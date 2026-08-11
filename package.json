@@ -52,7 +52,6 @@
         "test:ui": "vitest --ui",
         "test:coverage": "vitest run --coverage",
         "prepublishOnly": "npm run build",
-        "postinstall": "node scripts/patch-opencode-plugin.mjs",
         "plugin:verify": "node scripts/check-quota.mjs",
         "export:public": "node script/export-public-package.mjs",
         "verify:zero-touch": "./scripts/verify-zero-touch-loop.sh",
