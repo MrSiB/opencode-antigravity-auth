@@ -39,16 +39,16 @@ describe("parseRefreshParts", () => {
     expect(result).toEqual({
       refreshToken: "refreshToken",
       projectId: "projectId",
-      managedProjectId: "projectId",
+      managedProjectId: undefined,
     });
   });
 
-  it("parses refresh token with trailing pipe and sets managedProjectId to projectId", () => {
+  it("parses refresh token with trailing pipe and leaves managedProjectId undefined", () => {
     const result = parseRefreshParts("refreshToken|projectId|");
     expect(result).toEqual({
       refreshToken: "refreshToken",
       projectId: "projectId",
-      managedProjectId: "projectId",
+      managedProjectId: undefined,
     });
   });
 

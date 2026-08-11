@@ -754,15 +754,6 @@ export function classifyApiError(status: number, message?: string, bodyText?: st
   return "UNKNOWN";
 }
 
-function generateSyntheticProjectId(): string {
-  const adjectives = ["useful", "bright", "swift", "calm", "bold"];
-  const nouns = ["fuze", "wave", "spark", "flow", "core"];
-  const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
-  const noun = nouns[Math.floor(Math.random() * nouns.length)];
-  const randomPart = crypto.randomUUID().slice(0, 5).toLowerCase();
-  return `${adj}-${noun}-${randomPart}`;
-}
-
 const STREAM_ACTION = "streamGenerateContent";
 
 /**
@@ -1513,7 +1504,7 @@ export function prepareAntigravityRequest(
         stripInjectedDebugFromRequestPayload(requestPayload);
         sanitizeRequestPayloadForAntigravity(requestPayload);
 
-        const effectiveProjectId = projectId?.trim() || (headerStyle === "antigravity" ? generateSyntheticProjectId() : "");
+        const effectiveProjectId = projectId?.trim() || "";
         resolvedProjectId = effectiveProjectId;
 
         // Inject Antigravity system instruction with role "user" (CLIProxyAPI v6.6.89 compatibility)
@@ -1962,7 +1953,6 @@ export const __testExports = {
   hasToolUseInMessages,
   ensureThinkingBeforeToolUseInContents,
   ensureThinkingBeforeToolUseInMessages,
-  generateSyntheticProjectId,
   MIN_SIGNATURE_LENGTH,
   transformSseLine,
   transformStreamingPayload,

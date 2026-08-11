@@ -1352,8 +1352,6 @@ export const createAntigravityPlugin = (providerId: string) => async (
 ): Promise<PluginResult> => {
   await updateOpencodeConfig().catch(() => {});
 
-  startEmbeddedProxyServer();
-
   // Load configuration from files and environment variables
   const config = loadConfig(directory);
   initRuntimeConfig(config);
@@ -1534,8 +1532,6 @@ export const createAntigravityPlugin = (providerId: string) => async (
       }
 
       await updateOpencodeConfig().catch(() => {});
-
-  startEmbeddedProxyServer();
 
       // Cache getAuth for tool access
       cachedGetAuth = getAuth;

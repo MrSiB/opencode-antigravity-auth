@@ -113,6 +113,20 @@ export function invalidateProjectContextCache(refresh?: string): void {
   }
   projectContextPendingCache.delete(refresh);
   projectContextResultCache.delete(refresh);
+
+  const rawToken = refresh.split("|")[0]?.trim();
+  if (rawToken) {
+    for (const key of Array.from(projectContextResultCache.keys())) {
+      if (key.startsWith(rawToken)) {
+        projectContextResultCache.delete(key);
+      }
+    }
+    for (const key of Array.from(projectContextPendingCache.keys())) {
+      if (key.startsWith(rawToken)) {
+        projectContextPendingCache.delete(key);
+      }
+    }
+  }
 }
 
 /**

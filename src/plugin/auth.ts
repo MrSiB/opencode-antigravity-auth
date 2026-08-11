@@ -14,7 +14,7 @@ export function parseRefreshParts(refresh: string): RefreshParts {
   const parts = (refresh ?? "").split("|").map((p) => p.trim());
   const refreshToken = parts[0] || "";
   const projectId = parts[1] || undefined;
-  const managedProjectId = parts[2] || projectId || undefined;
+  const managedProjectId = parts[2] || undefined;
   return {
     refreshToken,
     projectId: projectId || undefined,

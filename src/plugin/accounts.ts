@@ -9,6 +9,7 @@ import { getModelFamily } from "./transform/model-resolver.js";
 import { debugLogToFile } from "./debug.js";
 import { formatAccountLabel } from "./logging-utils.js";
 import { createLogger } from "./logger.js";
+import { ensureProjectContext, invalidateProjectContextCache, type ProjectContextResult } from "./project.js";
 
 const log = createLogger("accounts");
 
@@ -1018,9 +1019,46 @@ export class AccountManager {
     return true;
   }
 
+  /**
+   * Invalidates cached project context and clears managedProjectId for an account
+   * when a project 400 error occurs, triggering dynamic resolution on next request.
+   */
+  invalidateAccountProjectContext(accountOrIndex: number | ManagedAccount): void {
+    const account = typeof accountOrIndex === "number" ? this.accounts[accountOrIndex] : accountOrIndex;
+    if (!account) return;
+
+    const refresh = formatRefreshParts(account.parts);
+    invalidateProjectContextCache(refresh);
+
+    account.parts = {
+      ...account.parts,
+      managedProjectId: undefined,
+    };
+
+    this.requestSaveToDisk();
+  }
+
+  /**
+   * Ensures an account has a valid dynamically resolved project context,
+   * querying Google API (loadCodeAssist / onboardUser) if managedProjectId is absent or invalidated.
+   */
+  async ensureAccountProjectContext(accountOrIndex: number | ManagedAccount): Promise<ProjectContextResult | null> {
+    const account = typeof accountOrIndex === "number" ? this.accounts[accountOrIndex] : accountOrIndex;
+    if (!account) return null;
+
+    const auth = this.toAuthDetails(account);
+    const result = await ensureProjectContext(auth);
+
+    if (result.auth.refresh !== auth.refresh || result.auth.access !== auth.access) {
+      this.updateFromAuth(account, result.auth);
+      this.requestSaveToDisk();
+    }
+
+    return result;
+  }
+
   updateFromAuth(account: ManagedAccount, auth: OAuthAuthDetails): void {
     const parts = parseRefreshParts(auth.refresh);
-    // Preserve existing projectId/managedProjectId if not in the new parts
     account.parts = {
       ...parts,
       projectId: parts.projectId ?? account.parts.projectId,
