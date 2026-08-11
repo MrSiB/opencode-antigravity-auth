@@ -48,8 +48,7 @@
     "export:public": "node script/export-public-package.mjs",
     "verify:zero-touch": "./scripts/verify-zero-touch-loop.sh",
     "test:e2e:models": "npx tsx script/test-models.ts",
-    "test:e2e:regression": "npx tsx script/test-regression.ts",
-    "prepare": "npm run build"
+    "test:e2e:regression": "npx tsx script/test-regression.ts"
   },
   "peerDependencies": {
     "typescript": "^5"
