@@ -55,7 +55,6 @@ export const MODEL_ALIASES: Record<string, string> = {
   "gemini-claude-opus-4-6-thinking-high": "claude-opus-4-6-thinking",
   "gemini-claude-sonnet-4-6": "claude-sonnet-4-6",
 
-  // Image generation models - only gemini-3-pro-image is available via Antigravity API
   "gemini-3-pro-image-preview": "gemini-3-pro-image",
   "gemini-3-pro-image-high": "gemini-3-pro-image",
   "gemini-3-pro-image-low": "gemini-3-pro-image",
