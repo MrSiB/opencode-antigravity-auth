@@ -6,6 +6,25 @@ Solutions to common issues with the Antigravity Auth plugin.
 
 ---
 
+## Embedded Proxy Connection Failure (`127.0.0.1:51128`)
+
+**Error:**
+```
+AI_APICallError: Cannot connect to API: Unable to connect
+Unexpected server error when running opencode run --model=google/...
+```
+
+**Causes:**
+1. Package exports mismatch in `package.json`: `"exports"` or `"module"` pointing to non-existent `./dist/plugin.js` instead of `./dist/index.js`, causing OpenCode to fail silently with `ERR_MODULE_NOT_FOUND` during startup.
+2. Missing `startEmbeddedProxyServer()` invocation during plugin creation.
+
+**Solution:**
+1. Ensure `package.json` points `"module"`, `"types"`, and `"exports"` to `./dist/index.js` and `./dist/index.d.ts`.
+2. `startEmbeddedProxyServer(51128)` is automatically invoked inside `createAntigravityPlugin` in `@MrSiB/opencode-antigravity-auth@1.4.3+`.
+3. Run `npm run export:public` to generate a clean `./public` release distribution.
+
+---
+
 ## Configuration Paths (All Platforms)
 
 OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
