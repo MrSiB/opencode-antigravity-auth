@@ -151,10 +151,12 @@ export function startEmbeddedProxyServer(port = 51128) {
             }
         }
         catch (err) {
+            log.error("Embedded proxy request error", { error: String(err), cause: String(err?.cause ?? "") });
             if (!res.headersSent) {
                 res.writeHead(500, { "Content-Type": "application/json" });
             }
-            res.end(JSON.stringify({ error: { message: err instanceof Error ? err.message : String(err) } }));
+            const causeStr = err?.cause ? `: ${String(err.cause)}` : "";
+            res.end(JSON.stringify({ error: { message: (err instanceof Error ? err.message : String(err)) + causeStr } }));
         }
     });
     server.on("error", (err) => {
@@ -1775,7 +1777,29 @@ export const createAntigravityPlugin = (providerId) => async (ctx) => {
                                     if (config.account_selection_strategy === 'hybrid') {
                                         tokenConsumed = getTokenTracker().consume(account.index);
                                     }
-                                    const response = await fetch(prepared.request, prepared.init);
+                                    let response;
+                                    try {
+                                        response = await fetch(prepared.request, prepared.init);
+                                    }
+                                    catch (fetchErr) {
+                                        pushDebug(`fetch-error=${String(fetchErr)} cause=${String(fetchErr?.cause ?? "")}`);
+                                        log.warn("Outgoing fetch failed, retrying...", { error: String(fetchErr), cause: String(fetchErr?.cause ?? "") });
+                                        await sleep(500, abortSignal);
+                                        try {
+                                            response = await fetch(prepared.request, prepared.init);
+                                        }
+                                        catch (secondErr) {
+                                            if (tokenConsumed) {
+                                                getTokenTracker().refund(account.index);
+                                                tokenConsumed = false;
+                                            }
+                                            trackAccountFailure(account.index);
+                                            getHealthTracker().recordFailure(account.index);
+                                            shouldSwitchAccount = true;
+                                            lastError = secondErr instanceof Error ? secondErr : new Error(String(secondErr));
+                                            break;
+                                        }
+                                    }
                                     pushDebug(`status=${response.status} ${response.statusText}`);
                                     // Handle 429 rate limit (or Service Overloaded) with improved logic
                                     if (response.status === 429 || response.status === 503 || response.status === 529) {

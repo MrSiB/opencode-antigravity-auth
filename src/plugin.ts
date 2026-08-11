@@ -208,10 +208,12 @@ export function startEmbeddedProxyServer(port: number = 51128): HttpServer {
         res.end();
       }
     } catch (err) {
+      log.error("Embedded proxy request error", { error: String(err), cause: String((err as any)?.cause ?? "") });
       if (!res.headersSent) {
         res.writeHead(500, { "Content-Type": "application/json" });
       }
-      res.end(JSON.stringify({ error: { message: err instanceof Error ? err.message : String(err) } }));
+      const causeStr = (err as any)?.cause ? `: ${String((err as any).cause)}` : "";
+      res.end(JSON.stringify({ error: { message: (err instanceof Error ? err.message : String(err)) + causeStr } }));
     }
   });
 
@@ -2194,7 +2196,27 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   tokenConsumed = getTokenTracker().consume(account.index);
                 }
 
-                const response = await fetch(prepared.request, prepared.init);
+                let response: Response;
+                try {
+                  response = await fetch(prepared.request, prepared.init);
+                } catch (fetchErr) {
+                  pushDebug(`fetch-error=${String(fetchErr)} cause=${String((fetchErr as any)?.cause ?? "")}`);
+                  log.warn("Outgoing fetch failed, retrying...", { error: String(fetchErr), cause: String((fetchErr as any)?.cause ?? "") });
+                  await sleep(500, abortSignal);
+                  try {
+                    response = await fetch(prepared.request, prepared.init);
+                  } catch (secondErr) {
+                    if (tokenConsumed) {
+                      getTokenTracker().refund(account.index);
+                      tokenConsumed = false;
+                    }
+                    trackAccountFailure(account.index);
+                    getHealthTracker().recordFailure(account.index);
+                    shouldSwitchAccount = true;
+                    lastError = secondErr instanceof Error ? secondErr : new Error(String(secondErr));
+                    break;
+                  }
+                }
                 pushDebug(`status=${response.status} ${response.statusText}`);
 
 
