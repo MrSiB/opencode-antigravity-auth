@@ -43,17 +43,7 @@
         "LICENSE",
         "assets/"
     ],
-    "scripts": {
-        "test": "vitest run",
-        "test:watch": "vitest",
-        "test:ui": "vitest --ui",
-        "test:coverage": "vitest run --coverage",
-        "postinstall": "node scripts/patch-opencode-plugin.mjs",
-        "plugin:verify": "node scripts/check-quota.mjs",
-        "verify:zero-touch": "./scripts/verify-zero-touch-loop.sh",
-        "test:e2e:models": "npx tsx script/test-models.ts",
-        "test:e2e:regression": "npx tsx script/test-regression.ts"
-    },
+    "scripts": {},
     "peerDependencies": {
         "typescript": "^5"
     },
