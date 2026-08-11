@@ -58,7 +58,7 @@ To select or configure transport options, update `~/.config/opencode/antigravity
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/MrSiB/opencode-antigravity-auth/master/assets/antigravity.schema.json",
+  "$schema": "https://raw.githubusercontent.com/mrsib/opencode-antigravity-auth/master/assets/antigravity.schema.json",
   "cli_first": false,
   "quota_fallback": false
 }

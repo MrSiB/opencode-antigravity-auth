@@ -305,7 +305,7 @@ Some MCP servers have schemas or tool keys incompatible with Antigravity's stric
 - **Schema Validation**:
   1. Disable all MCP servers in your `opencode.json`
   2. Enable them one-by-one until the error reappears
-  3. Report the specific MCP schema issue in a [GitHub issue](https://github.com/MrSiB/opencode-antigravity-auth/issues)
+  3. Report the specific MCP schema issue in a [GitHub issue](https://github.com/mrsib/opencode-antigravity-auth/issues)
 
 ---
 
@@ -383,7 +383,7 @@ If you experience high CPU usage or spin-loop OOM errors when accounts hit rate 
 
 **What to report:**
 
-If you're seeing unusual rate limit behavior, please share in a [GitHub issue](https://github.com/MrSiB/opencode-antigravity-auth/issues):
+If you're seeing unusual rate limit behavior, please share in a [GitHub issue](https://github.com/mrsib/opencode-antigravity-auth/issues):
 - Status codes from debug logs (403, 429, etc.)
 - How long the rate-limit state persists
 - Number of accounts and selection strategy used
@@ -587,5 +587,5 @@ npx tsx script/test-regression.ts --dry-run     # List tests
 
 ## Still stuck?
 
-Open an issue on [GitHub](https://github.com/MrSiB/opencode-antigravity-auth/issues).
+Open an issue on [GitHub](https://github.com/mrsib/opencode-antigravity-auth/issues).
 

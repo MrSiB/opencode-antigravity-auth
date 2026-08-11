@@ -4,7 +4,7 @@ Create `~/.config/opencode/antigravity.json` (or `.opencode/antigravity.json` in
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/MrSiB/opencode-antigravity-auth/master/assets/antigravity.schema.json"
+  "$schema": "https://raw.githubusercontent.com/mrsib/opencode-antigravity-auth/master/assets/antigravity.schema.json"
 }
 ```
 
@@ -18,7 +18,7 @@ Most settings have sensible defaults, so only configure what you need.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/MrSiB/opencode-antigravity-auth/master/assets/antigravity.schema.json"
+  "$schema": "https://raw.githubusercontent.com/mrsib/opencode-antigravity-auth/master/assets/antigravity.schema.json"
 }
 ```
 
@@ -137,7 +137,7 @@ Ready to use configuration presets.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/MrSiB/opencode-antigravity-auth/master/assets/antigravity.schema.json",
+  "$schema": "https://raw.githubusercontent.com/mrsib/opencode-antigravity-auth/master/assets/antigravity.schema.json",
   "account_selection_strategy": "sticky"
 }
 ```
@@ -149,7 +149,7 @@ Ready to use configuration presets.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/MrSiB/opencode-antigravity-auth/master/assets/antigravity.schema.json",
+  "$schema": "https://raw.githubusercontent.com/mrsib/opencode-antigravity-auth/master/assets/antigravity.schema.json",
   "account_selection_strategy": "hybrid"
 }
 ```
@@ -161,7 +161,7 @@ Ready to use configuration presets.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/MrSiB/opencode-antigravity-auth/master/assets/antigravity.schema.json",
+  "$schema": "https://raw.githubusercontent.com/mrsib/opencode-antigravity-auth/master/assets/antigravity.schema.json",
   "account_selection_strategy": "round-robin",
   "switch_on_first_rate_limit": true,
   "pid_offset_enabled": true

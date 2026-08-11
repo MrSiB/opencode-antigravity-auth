@@ -54,7 +54,7 @@ Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth
 Paste this into any LLM agent (Claude Code, OpenCode, Cursor, etc.):
 
 ```
-Install the @mrsib/opencode-antigravity-auth plugin and add the Antigravity model definitions to ~/.config/opencode/opencode.json by following: https://raw.githubusercontent.com/MrSiB/opencode-antigravity-auth/master/README.md
+Install the @mrsib/opencode-antigravity-auth plugin and add the Antigravity model definitions to ~/.config/opencode/opencode.json by following: https://raw.githubusercontent.com/mrsib/opencode-antigravity-auth/master/README.md
 ```
 
 **Option B: Manual setup**
@@ -499,7 +499,7 @@ This usually means an MCP tool name starts with a number (for example, a 1mcp ke
 **Diagnosis:**
 1. Disable all MCP servers in your config
 2. Enable one-by-one until error reappears
-3. Report the specific MCP in a [GitHub issue](https://github.com/MrSiB/opencode-antigravity-auth/issues)
+3. Report the specific MCP in a [GitHub issue](https://github.com/mrsib/opencode-antigravity-auth/issues)
 
 ---
 
@@ -691,7 +691,7 @@ Create `~/.config/opencode/antigravity.json` for optional settings:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/MrSiB/opencode-antigravity-auth/master/assets/antigravity.schema.json"
+  "$schema": "https://raw.githubusercontent.com/mrsib/opencode-antigravity-auth/master/assets/antigravity.schema.json"
 }
 ```
 

@@ -1,7 +1,7 @@
 # Установка плагина из GitHub
 
 ## Описание проблемы с установкой из исходников
-При попытке установить плагин напрямую из ветки `main` (или из исходников) через команду `opencode plugin MrSiB/opencode-antigravity-auth` может возникать ошибка встроенного пакетного менеджера `bun`:
+При попытке установить плагин напрямую из ветки `main` (или из исходников) через команду `opencode plugin mrsib/opencode-antigravity-auth` может возникать ошибка встроенного пакетного менеджера `bun`:
 `git dep preparation failed`
 
 **Причины ошибки:**
@@ -17,7 +17,7 @@
 
 ### Команда установки
 ```bash
-opencode plugin MrSiB/opencode-antigravity-auth#latest -g -f
+opencode plugin mrsib/opencode-antigravity-auth#latest -g -f
 ```
 Эта команда скачает готовую сборку плагина и установит ее глобально. Благодаря отсутствию скриптов жизненного цикла в `package.json`, `bun` не будет пытаться что-либо скомпилировать, и установка пройдет мгновенно и без ошибок.
 
@@ -44,6 +44,6 @@ cd public
 git init
 git add .
 git commit -m "release: fully clean package.json"
-git push -f git@github.com:MrSiB/opencode-antigravity-auth.git HEAD:latest
+git push -f git@github.com:mrsib/opencode-antigravity-auth.git HEAD:latest
 ```
 После этого обновленная сборка станет доступна всем пользователям для чистой установки.
