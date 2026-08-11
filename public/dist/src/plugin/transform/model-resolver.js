@@ -45,8 +45,9 @@ export const MODEL_ALIASES = {
     "gemini-claude-opus-4-6-thinking-high": "claude-opus-4-6-thinking",
     "gemini-claude-sonnet-4-6": "claude-sonnet-4-6",
     // Image generation models - only gemini-3-pro-image is available via Antigravity API
-    // Note: gemini-2.5-flash-image (Nano Banana) is NOT supported by Antigravity - only Google AI API
-    // Reference: Antigravity-Manager/src-tauri/src/proxy/common/model_mapping.rs
+    "gemini-3-pro-image-preview": "gemini-3-pro-image",
+    "gemini-3-pro-image-high": "gemini-3-pro-image",
+    "gemini-3-pro-image-low": "gemini-3-pro-image",
 };
 const TIER_REGEX = /-(minimal|low|medium|high)$/;
 const QUOTA_PREFIX_REGEX = /^antigravity-/i;
