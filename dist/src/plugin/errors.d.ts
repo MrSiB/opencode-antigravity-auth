@@ -1,5 +1,5 @@
 /**
- * Custom error types for @MrSiB/opencode-antigravity-auth plugin.
+ * Custom error types for @mrsib/opencode-antigravity-auth plugin.
  *
  * Ported from LLM-API-Key-Proxy for robust error handling.
  */

@@ -1,5 +1,5 @@
 /**
- * Configuration loader for @MrSiB/opencode-antigravity-auth plugin.
+ * Configuration loader for @mrsib/opencode-antigravity-auth plugin.
  * 
  * Loads config from files.
  * Priority (lowest to highest):

@@ -16,8 +16,8 @@ if (!fs.existsSync(publicDir)) {
 const pkgPath = join(rootDir, "package.json");
 const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
 
-// Ensure package name is @MrSiB/opencode-antigravity-auth
-pkg.name = "@MrSiB/opencode-antigravity-auth";
+// Ensure package name is @mrsib/opencode-antigravity-auth
+pkg.name = "@mrsib/opencode-antigravity-auth";
 
 // Delete scripts and devDependencies entirely
 delete pkg.scripts;
@@ -38,4 +38,4 @@ for (const item of itemsToCopy) {
   }
 }
 
-console.log("Successfully exported public package to ./public with name @MrSiB/opencode-antigravity-auth");
+console.log("Successfully exported public package to ./public with name @mrsib/opencode-antigravity-auth");

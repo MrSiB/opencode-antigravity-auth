@@ -1,5 +1,5 @@
 import type { AntigravityConfig } from "./config/index.js";
-export declare const DEBUG_MESSAGE_PREFIX = "[@MrSiB/opencode-antigravity-auth debug]";
+export declare const DEBUG_MESSAGE_PREFIX = "[@mrsib/opencode-antigravity-auth debug]";
 /**
  * Initialize or reinitialize debug state with the given config.
  * Call this once at plugin startup after loading config.

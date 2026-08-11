@@ -20,7 +20,7 @@ Unexpected server error when running opencode run --model=google/...
 
 **Solution:**
 1. Ensure `package.json` points `"module"`, `"types"`, and `"exports"` to `./dist/index.js` and `./dist/index.d.ts`.
-2. `startEmbeddedProxyServer(51128)` is automatically invoked inside `createAntigravityPlugin` in `@MrSiB/opencode-antigravity-auth@1.4.3+`.
+2. `startEmbeddedProxyServer(51128)` is automatically invoked inside `createAntigravityPlugin` in `@mrsib/opencode-antigravity-auth@1.4.3+`.
 3. Run `npm run export:public` to generate a clean `./public` release distribution.
 
 ---
@@ -48,7 +48,7 @@ When instructing an LLM agent (e.g. Claude Code, Cursor, OpenCode, Codex) to set
 
 ```
 Install and configure the opencode-antigravity-auth plugin:
-1. Ensure ~/.config/opencode/opencode.json exists and contains "plugin": ["opencode-antigravity-auth@latest"] (or "@MrSiB/opencode-antigravity-auth@latest").
+1. Ensure ~/.config/opencode/opencode.json exists and contains "plugin": ["opencode-antigravity-auth@latest"] (or "@mrsib/opencode-antigravity-auth@latest").
 2. Ensure provider.google is configured in ~/.config/opencode/opencode.json with valid model definitions (e.g., antigravity-gemini-3.1-pro-low, antigravity-claude-sonnet-4-6-thinking, antigravity-gemini-3.5-flash-low).
 3. Set the default provider/model to google/antigravity-claude-opus-4-6-thinking or google/antigravity-gemini-3.5-flash-low.
 4. Run `opencode auth login` to authenticate with Google OAuth.
@@ -143,8 +143,8 @@ Stop-Process -Name "opencode" -Force -ErrorAction SilentlyContinue
 **macOS/Linux:**
 ```bash
 rm -f ~/.config/opencode/antigravity-accounts.json
-rm -rf ~/.cache/opencode/node_modules/@MrSiB/opencode-antigravity-auth
-rm -rf ~/.bun/install/cache/@MrSiB/opencode-antigravity-auth*
+rm -rf ~/.cache/opencode/node_modules/@mrsib/opencode-antigravity-auth
+rm -rf ~/.bun/install/cache/@mrsib/opencode-antigravity-auth*
 opencode auth login
 ```
 
@@ -152,8 +152,8 @@ opencode auth login
 ```powershell
 Remove-Item "$env:USERPROFILE\.config\opencode\antigravity-accounts.json" -Force -ErrorAction SilentlyContinue
 Remove-Item "$env:APPDATA\opencode\antigravity-accounts.json" -Force -ErrorAction SilentlyContinue
-Remove-Item "$env:LOCALAPPDATA\opencode\Cache\node_modules\@MrSiB/opencode-antigravity-auth" -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item "$env:USERPROFILE\.bun\install\cache\@MrSiB/opencode-antigravity-auth*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:LOCALAPPDATA\opencode\Cache\node_modules\@mrsib/opencode-antigravity-auth" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\.bun\install\cache\@mrsib/opencode-antigravity-auth*" -Recurse -Force -ErrorAction SilentlyContinue
 opencode auth login
 ```
 
@@ -184,7 +184,7 @@ The correct key is `plugin` (singular):
 }
 ```
 
-> **Note:** `@MrSiB/opencode-antigravity-auth@latest` is also supported as an package alias.
+> **Note:** `@mrsib/opencode-antigravity-auth@latest` is also supported as an package alias.
 >
 > **Not** `"plugins"` (will cause "Unrecognized key" error).
 
@@ -208,18 +208,18 @@ Invalid SemVer
 **macOS / Linux:**
 ```bash
 cd ~/.cache/opencode
-bun add @MrSiB/opencode-antigravity-auth@latest
+bun add @mrsib/opencode-antigravity-auth@latest
 ```
 
 **Windows (PowerShell):**
 ```powershell
 Set-Location "$env:USERPROFILE\.cache\opencode"
-bun add @MrSiB/opencode-antigravity-auth@latest
+bun add @mrsib/opencode-antigravity-auth@latest
 ```
 
 Then restart OpenCode.
 
-> If you intentionally run beta channel, use `bun add @MrSiB/opencode-antigravity-auth@beta` instead.
+> If you intentionally run beta channel, use `bun add @mrsib/opencode-antigravity-auth@beta` instead.
 
 ---
 

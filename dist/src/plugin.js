@@ -2647,7 +2647,7 @@ export const createAntigravityPlugin = (providerId) => async (ctx) => {
                                             callback: async () => result,
                                         };
                                     }
-                                    console.warn(`[@MrSiB/opencode-antigravity-auth] Skipping failed account ${accounts.length + 1}: ${result.error}`);
+                                    console.warn(`[@mrsib/opencode-antigravity-auth] Skipping failed account ${accounts.length + 1}: ${result.error}`);
                                     break;
                                 }
                                 accounts.push(result);

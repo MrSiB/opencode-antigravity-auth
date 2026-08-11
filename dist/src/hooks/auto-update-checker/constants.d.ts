@@ -1,4 +1,4 @@
-export declare const PACKAGE_NAME = "@MrSiB/opencode-antigravity-auth";
+export declare const PACKAGE_NAME = "@mrsib/opencode-antigravity-auth";
 export declare const LEGACY_PACKAGE_NAME = "opencode-antigravity-auth";
 export declare const NPM_REGISTRY_URL: string;
 export declare const NPM_FETCH_TIMEOUT = 5000;

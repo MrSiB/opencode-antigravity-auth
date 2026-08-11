@@ -54,7 +54,7 @@ Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth
 Paste this into any LLM agent (Claude Code, OpenCode, Cursor, etc.):
 
 ```
-Install the @MrSiB/opencode-antigravity-auth plugin and add the Antigravity model definitions to ~/.config/opencode/opencode.json by following: https://raw.githubusercontent.com/MrSiB/opencode-antigravity-auth/master/README.md
+Install the @mrsib/opencode-antigravity-auth plugin and add the Antigravity model definitions to ~/.config/opencode/opencode.json by following: https://raw.githubusercontent.com/MrSiB/opencode-antigravity-auth/master/README.md
 ```
 
 **Option B: Manual setup**
@@ -63,11 +63,11 @@ Install the @MrSiB/opencode-antigravity-auth plugin and add the Antigravity mode
 
    ```json
    {
-     "plugin": ["@MrSiB/opencode-antigravity-auth@latest"]
+     "plugin": ["@mrsib/opencode-antigravity-auth@latest"]
    }
    ```
 
-   > Want bleeding-edge features? Use `@MrSiB/opencode-antigravity-auth@beta` instead.
+   > Want bleeding-edge features? Use `@mrsib/opencode-antigravity-auth@beta` instead.
 
 2. **Login** with your Google account:
 
@@ -147,7 +147,7 @@ Add this to your `~/.config/opencode/opencode.json`:
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
-    "@MrSiB/opencode-antigravity-auth@latest"
+    "@mrsib/opencode-antigravity-auth@latest"
   ],
   "provider": {
     "google": {
@@ -468,7 +468,7 @@ Invalid JSON payload received. Unknown name "parameters" at 'request.tools[0]'
 **Solutions:**
 1. **Update to latest beta:**
    ```json
-   { "plugin": ["@MrSiB/opencode-antigravity-auth@beta"] }
+   { "plugin": ["@mrsib/opencode-antigravity-auth@beta"] }
    ```
 
 2. **Disable MCP servers** one-by-one to find the problematic one
@@ -627,7 +627,7 @@ The correct key is `plugin` (singular):
 
 ```json
 {
-  "plugin": ["@MrSiB/opencode-antigravity-auth@beta"]
+  "plugin": ["@mrsib/opencode-antigravity-auth@beta"]
 }
 ```
 
@@ -638,7 +638,7 @@ The correct key is `plugin` (singular):
 ### Migrating Accounts Between Machines
 
 When copying `antigravity-accounts.json` to a new machine:
-1. Ensure the plugin is installed: `"plugin": ["@MrSiB/opencode-antigravity-auth@beta"]`
+1. Ensure the plugin is installed: `"plugin": ["@mrsib/opencode-antigravity-auth@beta"]`
 2. Copy `~/.config/opencode/antigravity-accounts.json`
 3. If you get "API key missing" error, the refresh token may be invalid — re-authenticate
 
@@ -656,7 +656,7 @@ DCP creates synthetic assistant messages that lack thinking blocks. **List this 
 ```json
 {
   "plugin": [
-    "@MrSiB/opencode-antigravity-auth@latest",
+    "@mrsib/opencode-antigravity-auth@latest",
     "@tarquinen/opencode-dcp@latest"
   ]
 }
