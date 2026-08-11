@@ -1,0 +1,37 @@
+# Security Rules Reference
+rules.md
+
+# OpenCode & Task Directories
+.omo/
+.opencode/
+.codegraph/
+.codegraph
+.backup/
+
+# Internal Agent & Incident Files
+AGENTS.md
+AGENTS.MD
+CLAUDE.md
+INCIDENT_*
+RESTORE_*
+fix_opencode_auth_incident.py
+
+# Internal Server & VM Scripts
+scripts/import_friend_accounts.ts
+scripts/setup-*.sh
+scripts/auth-pi-tools.sh
+scripts/restore.sh
+
+# Dependencies & Build Artifacts
+node_modules/
+dist/**/*.map
+*.tgz
+
+# Local Token/Cache/Config Directories & Files
+antigravity-accounts.json
+antigravity-logs/
+*token*
+*cache*
+!src/**
+*.tmp
+.env*
