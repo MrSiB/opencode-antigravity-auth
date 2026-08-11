@@ -1,0 +1,75 @@
+{
+    "name": "@MrSiB/opencode-antigravity-auth",
+    "version": "1.4.3",
+    "description": "Google Antigravity IDE OAuth auth plugin for Opencode - access Gemini 3 Pro and Claude 4.6 using Google credentials",
+    "main": "./dist/index.js",
+    "module": "./dist/plugin.js",
+    "types": "./dist/plugin.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/plugin.d.ts",
+            "import": "./dist/plugin.js",
+            "default": "./dist/plugin.js"
+        }
+    },
+    "type": "module",
+    "license": "MIT",
+    "author": "noefabris",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/MrSiB/opencode-antigravity-auth.git"
+    },
+    "homepage": "https://github.com/MrSiB/opencode-antigravity-auth#readme",
+    "bugs": {
+        "url": "https://github.com/MrSiB/opencode-antigravity-auth/issues"
+    },
+    "keywords": [
+        "opencode",
+        "google",
+        "antigravity",
+        "gemini",
+        "oauth",
+        "plugin",
+        "auth",
+        "claude"
+    ],
+    "engines": {
+        "node": ">=20.0.0"
+    },
+    "files": [
+        "dist/",
+        "scripts/",
+        "README.md",
+        "LICENSE",
+        "assets/"
+    ],
+    "scripts": {
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "test:ui": "vitest --ui",
+        "test:coverage": "vitest run --coverage",
+        "postinstall": "node scripts/patch-opencode-plugin.mjs",
+        "plugin:verify": "node scripts/check-quota.mjs",
+        "verify:zero-touch": "./scripts/verify-zero-touch-loop.sh",
+        "test:e2e:models": "npx tsx script/test-models.ts",
+        "test:e2e:regression": "npx tsx script/test-regression.ts"
+    },
+    "peerDependencies": {
+        "typescript": "^5"
+    },
+    "devDependencies": {
+        "@types/node": "^24.10.1",
+        "@types/proper-lockfile": "^4.1.4",
+        "@vitest/coverage-v8": "^3.0.0",
+        "@vitest/ui": "^3.0.0",
+        "typescript": "^5.0.0",
+        "vitest": "^3.0.0"
+    },
+    "dependencies": {
+        "@opencode-ai/plugin": "^0.15.31",
+        "@openauthjs/openauth": "^0.4.3",
+        "proper-lockfile": "^4.1.2",
+        "xdg-basedir": "^5.1.0",
+        "zod": "^4.0.0"
+    }
+}
