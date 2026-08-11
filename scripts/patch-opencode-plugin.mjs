@@ -7,11 +7,21 @@ try {
   const __dirname = path.dirname(__filename);
   const packageRoot = path.resolve(__dirname, "..");
 
-  const patchPath = path.resolve(packageRoot, "node_modules/@opencode-ai/plugin/dist/index.js");
-  if (fs.existsSync(patchPath)) {
-    const content = fs.readFileSync(patchPath, "utf8");
-    if (content.includes('export * from "./tool";')) {
-      fs.writeFileSync(patchPath, content.replace('export * from "./tool";', 'export * from "./tool.js";'));
+  const possiblePatchPaths = [
+    path.resolve(packageRoot, "node_modules/@opencode-ai/plugin/dist/index.js"),
+    path.resolve(packageRoot, "../@opencode-ai/plugin/dist/index.js"),
+    path.resolve(packageRoot, "../../@opencode-ai/plugin/dist/index.js"),
+    path.resolve(packageRoot, "../../../node_modules/@opencode-ai/plugin/dist/index.js"),
+  ];
+
+  for (const patchPath of possiblePatchPaths) {
+    if (fs.existsSync(patchPath)) {
+      try {
+        const content = fs.readFileSync(patchPath, "utf8");
+        if (content.includes('export * from "./tool";')) {
+          fs.writeFileSync(patchPath, content.replace('export * from "./tool";', 'export * from "./tool.js";'));
+        }
+      } catch {}
     }
   }
 
