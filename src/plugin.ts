@@ -179,11 +179,12 @@ export function startEmbeddedProxyServer(port: number = 51128): HttpServer {
 
       let body: Uint8Array | undefined;
       if (req.method !== "GET" && req.method !== "HEAD") {
-        const chunks: Buffer[] = [];
-        for await (const chunk of req) {
-          chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
-        }
-        body = new Uint8Array(Buffer.concat(chunks));
+        body = await new Promise<Uint8Array>((resolve, reject) => {
+          const chunks: Buffer[] = [];
+          req.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+          req.on("end", () => resolve(new Uint8Array(Buffer.concat(chunks))));
+          req.on("error", (err) => reject(err));
+        });
       }
 
       const requestInit: RequestInit = {
