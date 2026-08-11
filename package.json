@@ -35,31 +35,8 @@
     "LICENSE",
     "assets/"
   ],
-  "scripts": {
-    "build": "npx tsc -p tsconfig.build.json",
-    "build:schema": "npx tsx script/build-schema.ts",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:ui": "vitest --ui",
-    "test:coverage": "vitest run --coverage",
-    "prepublishOnly": "npm run build",
-    "plugin:verify": "node scripts/check-quota.mjs",
-    "export:public": "node script/export-public-package.mjs",
-    "verify:zero-touch": "./scripts/verify-zero-touch-loop.sh",
-    "test:e2e:models": "npx tsx script/test-models.ts",
-    "test:e2e:regression": "npx tsx script/test-regression.ts"
-  },
   "peerDependencies": {
     "typescript": "^5"
-  },
-  "devDependencies": {
-    "@types/node": "^24.10.1",
-    "@types/proper-lockfile": "^4.1.4",
-    "@vitest/coverage-v8": "^3.0.0",
-    "@vitest/ui": "^3.0.0",
-    "typescript": "^5.0.0",
-    "vitest": "^3.0.0"
   },
   "dependencies": {
     "@opencode-ai/plugin": "^0.15.31",
