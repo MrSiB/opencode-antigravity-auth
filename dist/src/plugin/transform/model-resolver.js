@@ -44,7 +44,7 @@ export const MODEL_ALIASES = {
     "gemini-claude-opus-4-6-thinking-medium": "claude-opus-4-6-thinking",
     "gemini-claude-opus-4-6-thinking-high": "claude-opus-4-6-thinking",
     "gemini-claude-sonnet-4-6": "claude-sonnet-4-6",
-    "gemini-3-pro-image-preview": "gemini-3-pro-image",
+    "gemini-3-pro-image-preview": "gemini-3.6-flash",
     "gemini-3-pro-image-high": "gemini-3-pro-image",
     "gemini-3-pro-image-low": "gemini-3-pro-image",
 };
@@ -80,6 +80,9 @@ const IMAGE_GENERATION_MODELS = /image|imagen/i;
  */
 function supportsThinkingTiers(model) {
     const lower = model.toLowerCase();
+    if (lower.includes("image") || lower.includes("imagen")) {
+        return false;
+    }
     return (lower.includes("gemini-3") ||
         lower.includes("gemini-2.5") ||
         (lower.includes("claude") && lower.includes("thinking")));
@@ -193,7 +196,7 @@ export function resolveModelWithTier(requestedModel, options = {}) {
         ? antigravityModel
         : MODEL_ALIASES[modelWithoutQuota] || MODEL_ALIASES[baseName] || baseName;
     let resolvedModel = resolveGemini35FlashApiModel(actualModel, tier);
-    if (quotaPreference === "antigravity") {
+    if (quotaPreference === "antigravity" && !isImageModel) {
         resolvedModel = resolveGemini36FlashApiModel(resolvedModel);
     }
     const isThinking = isThinkingCapableModel(resolvedModel);

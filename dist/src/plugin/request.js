@@ -616,6 +616,9 @@ export function prepareAntigravityRequest(input, init, accessToken, projectId, e
     const requestedModel = rawModel;
     const resolved = resolveModelForHeaderStyle(rawModel, headerStyle);
     let effectiveModel = resolved.actualModel;
+    if (effectiveModel.toLowerCase().includes("image")) {
+        effectiveModel = "gemini-3.6-flash-tiered";
+    }
     const streaming = rawAction === STREAM_ACTION;
     const defaultEndpoint = headerStyle === "gemini-cli" ? GEMINI_CLI_ENDPOINT : ANTIGRAVITY_ENDPOINT;
     const baseEndpoint = endpointOverride ?? defaultEndpoint;
@@ -1190,8 +1193,12 @@ export function prepareAntigravityRequest(input, init, accessToken, projectId, e
                         };
                     }
                 }
+                let apiModel = effectiveModel;
+                if (headerStyle === "antigravity" && isImageGenerationModel(effectiveModel)) {
+                    apiModel = "gemini-3.6-flash-tiered";
+                }
                 const wrappedBody = {
-                    model: effectiveModel,
+                    model: apiModel,
                     request: requestPayload,
                 };
                 if (headerStyle === "antigravity") {
