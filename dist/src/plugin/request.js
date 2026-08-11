@@ -566,7 +566,13 @@ const STREAM_ACTION = "streamGenerateContent";
  */
 export function isGenerativeLanguageRequest(input) {
     const url = typeof input === "string" ? input : input?.url || String(input);
-    return url.includes("generativelanguage.googleapis.com") || url.includes("googleapis.com");
+    return (url.includes("generativelanguage.googleapis.com") ||
+        url.includes("googleapis.com") ||
+        url.includes("51128") ||
+        url.includes("v1beta") ||
+        url.includes("v1internal") ||
+        url.includes("generateContent") ||
+        url.includes("chat/completions"));
 }
 export function prepareAntigravityRequest(input, init, accessToken, projectId, endpointOverride, headerStyle = "antigravity", forceThinkingRecovery = false, options) {
     const baseInit = { ...init };
