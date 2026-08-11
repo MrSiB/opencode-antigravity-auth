@@ -15,14 +15,14 @@ export declare function getUserConfigPath(): string;
 /**
  * Get the project-level config file path.
  */
-export declare function getProjectConfigPath(directory: string): string;
+export declare function getProjectConfigPath(directory?: string): string | null;
 /**
  * Load the complete configuration.
  *
  * @param directory - The project directory (for project-level config)
  * @returns Fully resolved configuration
  */
-export declare function loadConfig(directory: string): AntigravityConfig;
+export declare function loadConfig(directory?: string): AntigravityConfig;
 /**
  * Check if a config file exists at the given path.
  */

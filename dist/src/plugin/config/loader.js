@@ -40,6 +40,9 @@ export function getUserConfigPath() {
  * Get the project-level config file path.
  */
 export function getProjectConfigPath(directory) {
+    if (!directory || typeof directory !== "string") {
+        return null;
+    }
     return join(directory, ".opencode", "antigravity.json");
 }
 // =============================================================================
@@ -111,10 +114,14 @@ export function loadConfig(directory) {
         config = mergeConfigs(config, userConfig);
     }
     // Load project config file (if exists) - overrides user config
-    const projectConfigPath = getProjectConfigPath(directory);
-    const projectConfig = loadConfigFile(projectConfigPath);
-    if (projectConfig) {
-        config = mergeConfigs(config, projectConfig);
+    if (directory && typeof directory === "string") {
+        const projectConfigPath = getProjectConfigPath(directory);
+        if (projectConfigPath) {
+            const projectConfig = loadConfigFile(projectConfigPath);
+            if (projectConfig) {
+                config = mergeConfigs(config, projectConfig);
+            }
+        }
     }
     return config;
 }

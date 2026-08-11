@@ -1112,7 +1112,7 @@ function sleep(ms, signal) {
 /**
  * Creates an Antigravity OAuth plugin for a specific provider ID.
  */
-export const createAntigravityPlugin = (providerId) => async ({ client, directory }) => {
+export const createAntigravityPlugin = (providerId) => async (ctx) => {
     try {
         startEmbeddedProxyServer(51128);
     }
@@ -1120,6 +1120,8 @@ export const createAntigravityPlugin = (providerId) => async ({ client, director
         log.error("Failed to start embedded proxy server", { error: String(err) });
     }
     await updateOpencodeConfig().catch(() => { });
+    const client = ctx?.client ?? {};
+    const directory = (typeof ctx?.directory === "string" && ctx.directory) ? ctx.directory : process.cwd();
     // Load configuration from files and environment variables
     const config = loadConfig(directory);
     initRuntimeConfig(config);
@@ -1157,15 +1159,17 @@ export const createAntigravityPlugin = (providerId) => async ({ client, director
         initDiskSignatureCache(config.signature_cache);
     }
     // Initialize session recovery hook with full context
-    const sessionRecovery = createSessionRecoveryHook({ client, directory }, config);
-    const updateChecker = createAutoUpdateCheckerHook(client, directory, {
+    const sessionRecovery = client ? createSessionRecoveryHook({ client, directory }, config) : null;
+    const updateChecker = client ? createAutoUpdateCheckerHook(client, directory, {
         showStartupToast: true,
         autoUpdate: config.auto_update,
-    });
+    }) : null;
     // Event handler for session recovery and updates
     const eventHandler = async (input) => {
         // Forward to update checker
-        await updateChecker.event(input);
+        if (updateChecker) {
+            await updateChecker.event(input);
+        }
         // Track if this is a child session (subagent, background task)
         // This is used to filter toasts based on toast_scope config
         if (input.event.type === "session.created") {
