@@ -262,11 +262,12 @@ export async function ensureProjectContext(auth: OAuthAuthDetails): Promise<Proj
 
     const fallbackProjectId = ANTIGRAVITY_DEFAULT_PROJECT_ID;
     const persistManagedProject = async (managedProjectId: string): Promise<ProjectContextResult> => {
+      const proj = parts.projectId || managedProjectId;
       const updatedAuth: OAuthAuthDetails = {
         ...auth,
         refresh: formatRefreshParts({
           refreshToken: parts.refreshToken,
-          projectId: parts.projectId,
+          projectId: proj,
           managedProjectId,
         }),
       };

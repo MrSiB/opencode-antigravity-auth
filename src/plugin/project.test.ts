@@ -72,6 +72,61 @@ describe("Project Management & Onboarding for New Accounts", () => {
 
     const result = await ensureProjectContext(auth);
     expect(result.effectiveProjectId).toBe("auto-provisioned-project-789");
-    expect(result.auth.refresh).toBe("refresh-token-new-account||auto-provisioned-project-789");
+    expect(result.auth.refresh).toBe("refresh-token-new-account|auto-provisioned-project-789|auto-provisioned-project-789");
+  });
+
+  it("dynamically queries Google API when account has 2-part refresh token missing managedProjectId", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        cloudaicompanionProject: { id: "dynamically-resolved-gcp-999" },
+      }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const auth: OAuthAuthDetails = {
+      type: "oauth",
+      refresh: "raw-refresh-token",
+      access: "access-token-123",
+    };
+
+    const result = await ensureProjectContext(auth);
+    expect(mockFetch).toHaveBeenCalled();
+    expect(result.effectiveProjectId).toBe("dynamically-resolved-gcp-999");
+    expect(result.auth.refresh).toBe("raw-refresh-token|dynamically-resolved-gcp-999|dynamically-resolved-gcp-999");
+  });
+
+  it("re-queries Google API after cache invalidation", async () => {
+    let callCount = 0;
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      callCount++;
+      return {
+        ok: true,
+        json: async () => ({
+          cloudaicompanionProject: { id: `resolved-gcp-${callCount}` },
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const auth: OAuthAuthDetails = {
+      type: "oauth",
+      refresh: "refresh-token-requery",
+      access: "access-token-123",
+    };
+
+    const result1 = await ensureProjectContext(auth);
+    expect(result1.effectiveProjectId).toBe("resolved-gcp-1");
+
+    // Invalidate cache
+    invalidateProjectContextCache(result1.auth.refresh);
+
+    const authToRequery: OAuthAuthDetails = {
+      type: "oauth",
+      refresh: "refresh-token-requery",
+      access: "access-token-123",
+    };
+    const result2 = await ensureProjectContext(authToRequery);
+    expect(result2.effectiveProjectId).toBe("resolved-gcp-2");
   });
 });
