@@ -43,6 +43,9 @@ Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth
 
 ## Installation
 
+> **Внимание!** При установке из исходников (с GitHub) используйте ветку `#latest`. Ознакомьтесь с [документацией по правильной установке из Git](docs/INSTALLATION_FROM_GIT.md).
+
+
 <details open>
 <summary><b>For Humans</b></summary>
 
