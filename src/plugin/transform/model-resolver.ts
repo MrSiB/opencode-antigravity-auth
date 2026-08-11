@@ -55,7 +55,7 @@ export const MODEL_ALIASES: Record<string, string> = {
   "gemini-claude-opus-4-6-thinking-high": "claude-opus-4-6-thinking",
   "gemini-claude-sonnet-4-6": "claude-sonnet-4-6",
 
-  "gemini-3-pro-image-preview": "gemini-3.6-flash",
+  "gemini-3-pro-image-preview": "gemini-3-pro-image",
   "gemini-3-pro-image-high": "gemini-3-pro-image",
   "gemini-3-pro-image-low": "gemini-3-pro-image",
 };
