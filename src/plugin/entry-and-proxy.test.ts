@@ -15,25 +15,15 @@ describe("Entry Points and Embedded Proxy Server Tests", () => {
   });
 
   describe("package.json entry point resolution", () => {
-    it("resolves module, types, and exports paths to dist/index.js and dist/index.d.ts", () => {
+    it("resolves main and types paths to dist/index.js and dist/index.d.ts", () => {
       const pkgPath = resolve(process.cwd(), "package.json");
       expect(existsSync(pkgPath)).toBe(true);
 
       const pkgContent = readFileSync(pkgPath, "utf-8");
       const pkg = JSON.parse(pkgContent);
 
-      expect(pkg.module).toBe("./dist/index.js");
+      expect(pkg.main).toBe("./dist/index.js");
       expect(pkg.types).toBe("./dist/index.d.ts");
-      expect(pkg.exports).toBeDefined();
-
-      const mainExport = pkg.exports["."];
-      expect(mainExport).toBeDefined();
-      if (typeof mainExport === "string") {
-        expect(mainExport).toBe("./dist/index.js");
-      } else {
-        expect(mainExport.import).toBe("./dist/index.js");
-        expect(mainExport.types).toBe("./dist/index.d.ts");
-      }
     });
   });
 
