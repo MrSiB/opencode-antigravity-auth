@@ -21,6 +21,15 @@ This document explains how the Antigravity plugin works: request/response flow, 
 
 The plugin intercepts requests to `generativelanguage.googleapis.com`, transforms them for the Antigravity API, and handles authentication, rate limits, and error recovery.
 
+## Embedded Proxy Server (`startEmbeddedProxyServer`)
+
+The plugin includes an embedded HTTP proxy server listening on port `51128` (`http://127.0.0.1:51128/v1beta`).
+- **Auto-start**: Started automatically during plugin initialization in `createAntigravityPlugin`.
+- **Safe Loader Context**: `loadConfig(directory?)` gracefully handles missing or undefined directory parameters to prevent startup exceptions.
+- **Path Resolution**: `package.json` `"exports"`, `"main"`, and `"module"` resolve to `./dist/index.js` and `./dist/index.d.ts`.
+- **Request Detection**: `isGenerativeLanguageRequest` intercepts requests targeting `51128`, `v1beta`, `v1internal`, and `googleapis.com`.
+- **Model Resolution & Title Preview Fallback**: Maps preview models (e.g. `gemini-3-pro-image-preview` requested by OpenCode title generator) to `gemini-3.6-flash` so Google API stream requests complete successfully.
+
 ---
 
 ## Module Structure
