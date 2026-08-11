@@ -26,6 +26,7 @@ scripts/restore.sh
 node_modules/
 dist/**/*.map
 *.tgz
+public/
 
 # Local Token/Cache/Config Directories & Files
 antigravity-accounts.json
