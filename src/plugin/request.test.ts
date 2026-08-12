@@ -1,9 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   prepareAntigravityRequest,
   transformAntigravityResponse,
   getPluginSessionId,
   isGenerativeLanguageRequest,
+  reportTokenUsageTelemetry,
   __testExports,
 } from "./request.js";
 import { DEFAULT_CONFIG } from "./config/index.js";
@@ -1273,6 +1274,76 @@ describe("request.ts", () => {
           "session-1",
         ),
       ).rejects.toMatchObject({ message: "THINKING_RECOVERY_NEEDED" });
+    });
+  });
+
+  describe("reportTokenUsageTelemetry", () => {
+    let fetchSpy: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      fetchSpy = vi.fn().mockResolvedValue(new Response("ok"));
+      vi.stubGlobal("fetch", fetchSpy);
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("dispatches POST request with correct email, model, prompt_tokens, completion_tokens, and total_tokens", () => {
+      reportTokenUsageTelemetry(
+        "https://test.telemetry/v1/record",
+        "dev@example.com",
+        "gemini-3.6-flash-high",
+        { promptTokens: 120, candidateTokens: 60, totalTokens: 180 },
+      );
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const call = fetchSpy.mock.calls[0] as [string, RequestInit];
+      const [url, init] = call;
+      expect(url).toBe("https://test.telemetry/v1/record");
+      expect(init.method).toBe("POST");
+      expect(init.headers).toEqual({ "Content-Type": "application/json" });
+
+      const payload = JSON.parse(init.body as string);
+      expect(payload).toEqual({
+        email: "dev@example.com",
+        model: "gemini-3.6-flash-high",
+        prompt_tokens: 120,
+        completion_tokens: 60,
+        total_tokens: 180,
+      });
+      expect(init.signal).toBeDefined();
+    });
+
+    it("handles undefined values safely with defaults ('local-developer' and 0)", () => {
+      reportTokenUsageTelemetry(undefined, undefined, undefined, {});
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const call = fetchSpy.mock.calls[0] as [string, RequestInit];
+      const [url, init] = call;
+      expect(url).toBe("https://llm.wdsa.ru/v1/status/record_usage");
+
+      const payload = JSON.parse(init.body as string);
+      expect(payload).toEqual({
+        email: "local-developer",
+        model: undefined,
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+      });
+    });
+
+    it("safely ignores errors when fetch rejects", () => {
+      fetchSpy.mockRejectedValue(new Error("Connection refused"));
+
+      expect(() => {
+        reportTokenUsageTelemetry(
+          "https://test.telemetry/v1/record",
+          "dev@example.com",
+          "gemini-3.6-flash",
+          { promptTokens: 10, candidateTokens: 10, totalTokens: 20 },
+        );
+      }).not.toThrow();
     });
   });
 });

@@ -4,7 +4,8 @@ import type { AccountSelectionStrategy } from "./config/schema.js";
 import { type Fingerprint, type FingerprintVersion } from "./fingerprint.js";
 import type { QuotaGroup, QuotaGroupSummary, GeminiCliQuotaSummary } from "./quota.js";
 import { type ProjectContextResult } from "./project.js";
-export type { ModelFamily, HeaderStyle, CooldownReason } from "./storage.js";
+export type { ModelFamily, HeaderStyle, CooldownReason, QuotaSnapshot } from "./storage.js";
+export { calculateEmpiricalCapacity } from "./storage.js";
 export type { AccountSelectionStrategy } from "./config/schema.js";
 export type RateLimitReason = "QUOTA_EXHAUSTED" | "RATE_LIMIT_EXCEEDED" | "MODEL_CAPACITY_EXHAUSTED" | "SERVER_ERROR" | "UNKNOWN";
 export interface RateLimitBackoffResult {
@@ -104,6 +105,8 @@ export declare class AccountManager {
      */
     markAccountUsed(accountIndex: number): void;
     recordTokenUsage(account: ManagedAccount, family: ModelFamily, tokens: number): void;
+    recordQuotaSnapshot(account: ManagedAccount, family: ModelFamily, remainingFraction: number, timestamp?: number): void;
+    getEmpiricalCapacity(account: ManagedAccount, family: ModelFamily): number | undefined;
     get5HourRollingTokenUsage(account: ManagedAccount, family: ModelFamily): number;
     getEffective5HourCap(account: ManagedAccount, family: ModelFamily): number;
     isAccountTokenSoftCapExhausted(account: ManagedAccount, family: ModelFamily): boolean;

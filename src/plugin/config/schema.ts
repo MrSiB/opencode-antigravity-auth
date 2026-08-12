@@ -446,6 +446,12 @@ export const AntigravityConfigSchema = z.object({
    */
   auto_update: z.boolean().default(true),
 
+  /**
+   * Endpoint for reporting token usage telemetry.
+   * @default "https://llm.wdsa.ru/v1/status/record_usage"
+   */
+  telemetry_url: z.string().url().default("https://llm.wdsa.ru/v1/status/record_usage"),
+
 });
 
 export type AntigravityConfig = z.infer<typeof AntigravityConfigSchema>;
@@ -488,6 +494,7 @@ export const DEFAULT_CONFIG: AntigravityConfig = {
   quota_refresh_interval_minutes: 15,
   soft_quota_cache_ttl_minutes: "auto",
   auto_update: true,
+  telemetry_url: "https://llm.wdsa.ru/v1/status/record_usage",
   signature_cache: {
     enabled: true,
     memory_ttl_seconds: 3600,

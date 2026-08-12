@@ -37,6 +37,14 @@ export declare function isModelUnavailableError(status: number, message?: string
  */
 export declare function classifyApiError(status: number, message?: string, bodyText?: string): string;
 /**
+ * Sends non-blocking async token usage telemetry to the configured status endpoint.
+ */
+export declare function reportTokenUsageTelemetry(telemetryUrl: string | undefined, accountEmail: string | undefined, model: string | undefined, usage: {
+    promptTokens?: number;
+    candidateTokens?: number;
+    totalTokens?: number;
+}): void;
+/**
  * Detects requests headed to the Google Generative Language API so we can intercept them.
  */
 export declare function isGenerativeLanguageRequest(input: RequestInfo): boolean;

@@ -1,5 +1,5 @@
 import { formatRefreshParts, parseRefreshParts } from "./auth.js";
-import { loadAccounts, saveAccounts, saveAccountsReplace, addTokensToUsageState, getRollingTokenUsage, type AccountStorageV4, type AccountMetadataV3, type RateLimitStateV3, type ModelFamily, type HeaderStyle, type CooldownReason, type AccountTokenUsageState } from "./storage.js";
+import { loadAccounts, saveAccounts, saveAccountsReplace, addTokensToUsageState, getRollingTokenUsage, calculateEmpiricalCapacity, type AccountStorageV4, type AccountMetadataV3, type RateLimitStateV3, type ModelFamily, type HeaderStyle, type CooldownReason, type AccountTokenUsageState, type QuotaSnapshot } from "./storage.js";
 import type { OAuthAuthDetails, RefreshParts } from "./types.js";
 import type { AccountSelectionStrategy } from "./config/schema.js";
 import { getHealthTracker, getTokenTracker, selectHybridAccount, type AccountWithMetrics } from "./rotation.js";
@@ -14,7 +14,8 @@ import { ensureProjectContext, invalidateProjectContextCache, type ProjectContex
 const log = createLogger("accounts");
 
 
-export type { ModelFamily, HeaderStyle, CooldownReason } from "./storage.js";
+export type { ModelFamily, HeaderStyle, CooldownReason, QuotaSnapshot } from "./storage.js";
+export { calculateEmpiricalCapacity } from "./storage.js";
 export type { AccountSelectionStrategy } from "./config/schema.js";
 
 
@@ -683,6 +684,26 @@ export class AccountManager {
   recordTokenUsage(account: ManagedAccount, family: ModelFamily, tokens: number): void {
     account.tokenUsage = addTokensToUsageState(account.tokenUsage, family, tokens);
     this.requestSaveToDisk();
+  }
+
+  recordQuotaSnapshot(account: ManagedAccount, family: ModelFamily, remainingFraction: number, timestamp: number = nowMs()): void {
+    const currentUsage: AccountTokenUsageState = account.tokenUsage ? { ...account.tokenUsage } : {};
+    const cutoff = timestamp - (14 * 24 * 3600 * 1000);
+    const existingSnapshots = (currentUsage.quotaSnapshots || []).filter((s) => s.timestamp > cutoff);
+    existingSnapshots.push({ timestamp, remainingFraction, family });
+    currentUsage.quotaSnapshots = existingSnapshots;
+    account.tokenUsage = currentUsage;
+    this.requestSaveToDisk();
+  }
+
+  getEmpiricalCapacity(account: ManagedAccount, family: ModelFamily): number | undefined {
+    const used = this.get5HourRollingTokenUsage(account, family);
+    const snapshots = account.tokenUsage?.quotaSnapshots || [];
+    const latestSnapshot = [...snapshots]
+      .reverse()
+      .find((s) => s.family === family);
+    const remainingFraction = latestSnapshot?.remainingFraction;
+    return calculateEmpiricalCapacity(used, remainingFraction);
   }
 
   get5HourRollingTokenUsage(account: ManagedAccount, family: ModelFamily): number {

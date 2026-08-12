@@ -1,5 +1,5 @@
 import { formatRefreshParts, parseRefreshParts } from "./auth.js";
-import { loadAccounts, saveAccounts, saveAccountsReplace, addTokensToUsageState, getRollingTokenUsage } from "./storage.js";
+import { loadAccounts, saveAccounts, saveAccountsReplace, addTokensToUsageState, getRollingTokenUsage, calculateEmpiricalCapacity } from "./storage.js";
 import { getHealthTracker, getTokenTracker, selectHybridAccount } from "./rotation.js";
 import { generateFingerprint, updateFingerprintVersion, MAX_FINGERPRINT_HISTORY } from "./fingerprint.js";
 import { getModelFamily } from "./transform/model-resolver.js";
@@ -8,6 +8,7 @@ import { formatAccountLabel } from "./logging-utils.js";
 import { createLogger } from "./logger.js";
 import { ensureProjectContext, invalidateProjectContextCache } from "./project.js";
 const log = createLogger("accounts");
+export { calculateEmpiricalCapacity } from "./storage.js";
 const QUOTA_EXHAUSTED_BACKOFFS = [60_000, 300_000, 1_800_000, 7_200_000];
 const RATE_LIMIT_EXCEEDED_BACKOFF = 30_000;
 // Increased from 15s to 45s base + jitter to reduce retry pressure on capacity errors
@@ -519,6 +520,24 @@ export class AccountManager {
     recordTokenUsage(account, family, tokens) {
         account.tokenUsage = addTokensToUsageState(account.tokenUsage, family, tokens);
         this.requestSaveToDisk();
+    }
+    recordQuotaSnapshot(account, family, remainingFraction, timestamp = nowMs()) {
+        const currentUsage = account.tokenUsage ? { ...account.tokenUsage } : {};
+        const cutoff = timestamp - (14 * 24 * 3600 * 1000);
+        const existingSnapshots = (currentUsage.quotaSnapshots || []).filter((s) => s.timestamp > cutoff);
+        existingSnapshots.push({ timestamp, remainingFraction, family });
+        currentUsage.quotaSnapshots = existingSnapshots;
+        account.tokenUsage = currentUsage;
+        this.requestSaveToDisk();
+    }
+    getEmpiricalCapacity(account, family) {
+        const used = this.get5HourRollingTokenUsage(account, family);
+        const snapshots = account.tokenUsage?.quotaSnapshots || [];
+        const latestSnapshot = [...snapshots]
+            .reverse()
+            .find((s) => s.family === family);
+        const remainingFraction = latestSnapshot?.remainingFraction;
+        return calculateEmpiricalCapacity(used, remainingFraction);
     }
     get5HourRollingTokenUsage(account, family) {
         return getRollingTokenUsage(account.tokenUsage, family, 5 * 3600 * 1000);

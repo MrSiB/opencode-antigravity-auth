@@ -126,6 +126,7 @@ export declare const AntigravityConfigSchema: z.ZodObject<{
         initial_tokens: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strip>>;
     auto_update: z.ZodDefault<z.ZodBoolean>;
+    telemetry_url: z.ZodDefault<z.ZodString>;
 }, z.core.$strip>;
 export type AntigravityConfig = z.infer<typeof AntigravityConfigSchema>;
 export type SignatureCacheConfig = z.infer<typeof SignatureCacheConfigSchema>;

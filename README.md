@@ -15,7 +15,7 @@ Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth
 
 ## What You Get
 
-- **Gemini 3.1 Pro, Gemini 3.5 Flash, Claude Opus/Sonnet 4.6 Thinking, and GPT-OSS 120B** via Google OAuth
+- **Gemini 3.6 Flash, Gemini 3.5 Flash, Gemini 3.1 Pro, Claude Opus/Sonnet 4.6 Thinking, and GPT-OSS 120B** via Google OAuth
 - **Multi-account support** — add multiple Google accounts, auto-rotates when rate-limited
 - **Antigravity quota routing** — current defaults avoid Gemini CLI models because individual Gemini CLI access sunsets on 2026-06-18
 - **Thinking models** — extended thinking for Claude and Gemini 3 with configurable budgets
@@ -528,12 +528,29 @@ If you encounter errors during a session:
 **Important:** Disable the built-in Google auth to prevent conflicts:
 
 ```json
-// ~/.config/opencode/oh-my-opencode.json
+// ~/.config/opencode/oh-my-opencode.json (or ~/.config/opencode/opencode.json)
 {
   "google_auth": false,
+  "categories": {
+    "ultrabrain": { "model": "google/antigravity-claude-opus-4-6-thinking" },
+    "visual-engineering": { "model": "google/antigravity-gemini-3.6-flash-high" },
+    "artistry": { "model": "google/antigravity-claude-sonnet-4-6" },
+    "deep": { "model": "google/antigravity-gemini-3.6-flash" },
+    "quick": { "model": "google/antigravity-gemini-3.6-flash-minimal" },
+    "unspecified-low": { "model": "google/antigravity-gemini-3.5-flash" },
+    "unspecified-high": { "model": "google/antigravity-gemini-3.6-flash-high" },
+    "writing": { "model": "google/antigravity-gemini-3.6-flash" }
+  },
   "agents": {
-    "frontend-ui-ux-engineer": { "model": "google/antigravity-gemini-3.1-pro-high" },
-    "document-writer": { "model": "google/antigravity-gemini-3.5-flash-low" }
+    "sisyphus": { "model": "google/antigravity-claude-opus-4-6-thinking" },
+    "oracle": { "model": "google/antigravity-claude-opus-4-6-thinking" },
+    "metis": { "model": "google/antigravity-gemini-3.1-pro-high" },
+    "momus": { "model": "google/antigravity-gemini-3.1-pro-high" },
+    "explore": { "model": "google/antigravity-gemini-3.6-flash" },
+    "librarian": { "model": "google/antigravity-gemini-3.6-flash" },
+    "frontend-ui-ux-engineer": { "model": "google/antigravity-gemini-3.6-flash-high" },
+    "document-writer": { "model": "google/antigravity-gemini-3.6-flash" },
+    "multimodal-looker": { "model": "google/antigravity-gemini-3.6-flash" }
   }
 }
 ```
@@ -669,10 +686,26 @@ Disable built-in auth and override agent models in `oh-my-opencode.json`:
 ```json
 {
   "google_auth": false,
+  "categories": {
+    "ultrabrain": { "model": "google/antigravity-claude-opus-4-6-thinking" },
+    "visual-engineering": { "model": "google/antigravity-gemini-3.6-flash-high" },
+    "artistry": { "model": "google/antigravity-claude-sonnet-4-6" },
+    "deep": { "model": "google/antigravity-gemini-3.6-flash" },
+    "quick": { "model": "google/antigravity-gemini-3.6-flash-minimal" },
+    "unspecified-low": { "model": "google/antigravity-gemini-3.5-flash" },
+    "unspecified-high": { "model": "google/antigravity-gemini-3.6-flash-high" },
+    "writing": { "model": "google/antigravity-gemini-3.6-flash" }
+  },
   "agents": {
-    "frontend-ui-ux-engineer": { "model": "google/antigravity-gemini-3.1-pro-high" },
-    "document-writer": { "model": "google/antigravity-gemini-3.5-flash-low" },
-    "multimodal-looker": { "model": "google/antigravity-gemini-3.5-flash-low" }
+    "sisyphus": { "model": "google/antigravity-claude-opus-4-6-thinking" },
+    "oracle": { "model": "google/antigravity-claude-opus-4-6-thinking" },
+    "metis": { "model": "google/antigravity-gemini-3.1-pro-high" },
+    "momus": { "model": "google/antigravity-gemini-3.1-pro-high" },
+    "explore": { "model": "google/antigravity-gemini-3.6-flash" },
+    "librarian": { "model": "google/antigravity-gemini-3.6-flash" },
+    "frontend-ui-ux-engineer": { "model": "google/antigravity-gemini-3.6-flash-high" },
+    "document-writer": { "model": "google/antigravity-gemini-3.6-flash" },
+    "multimodal-looker": { "model": "google/antigravity-gemini-3.6-flash" }
   }
 }
 ```

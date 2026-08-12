@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AccountManager, type ModelFamily, type HeaderStyle, parseRateLimitReason, calculateBackoffMs, type RateLimitReason, resolveQuotaGroup } from "./accounts.js";
+import { AccountManager, type ModelFamily, type HeaderStyle, parseRateLimitReason, calculateBackoffMs, type RateLimitReason, resolveQuotaGroup, calculateEmpiricalCapacity } from "./accounts.js";
 import type { AccountStorageV4 } from "./storage.js";
 import type { OAuthAuthDetails } from "./types.js";
 
@@ -2079,5 +2079,76 @@ describe("Token Limit Tracking & 95% Soft-Cap Rotation", () => {
     );
 
     expect(selected).toBeNull();
+  });
+
+  describe("quotaSnapshots and Empirical Capacity", () => {
+    it("calculateEmpiricalCapacity calculates correct capacity and handles edge cases", () => {
+      expect(calculateEmpiricalCapacity(10000, 0.5)).toBeUndefined();
+      expect(calculateEmpiricalCapacity(15000, undefined)).toBeUndefined();
+      expect(calculateEmpiricalCapacity(15000, -0.1)).toBeUndefined();
+      expect(calculateEmpiricalCapacity(15000, 1.0)).toBeUndefined();
+      expect(calculateEmpiricalCapacity(15000, NaN)).toBeUndefined();
+
+      expect(calculateEmpiricalCapacity(15000, 0.5)).toBe(30000);
+      expect(calculateEmpiricalCapacity(10001, 0.0)).toBe(10001);
+      expect(calculateEmpiricalCapacity(10001, 0.99)).toBe(1000100);
+    });
+
+    it("recordQuotaSnapshot appends snapshot and prunes entries older than 14 days", () => {
+      vi.useFakeTimers();
+      const now = 1000000000000;
+      vi.setSystemTime(new Date(now));
+
+      const stored: AccountStorageV4 = {
+        version: 4,
+        accounts: [
+          { refreshToken: "r1", addedAt: 1, lastUsed: 0, enabled: true },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const acc = manager.getAccounts()[0]!;
+
+      const fifteenDaysAgo = now - (15 * 24 * 3600 * 1000);
+      acc.tokenUsage = {
+        quotaSnapshots: [
+          { timestamp: fifteenDaysAgo, remainingFraction: 0.8, family: "gemini" },
+        ],
+      };
+
+      manager.recordQuotaSnapshot(acc, "gemini", 0.5, now);
+
+      expect(acc.tokenUsage?.quotaSnapshots?.length).toBe(1);
+      expect(acc.tokenUsage?.quotaSnapshots?.[0]?.remainingFraction).toBe(0.5);
+      expect(acc.tokenUsage?.quotaSnapshots?.[0]?.timestamp).toBe(now);
+
+      vi.useRealTimers();
+    });
+
+    it("getEmpiricalCapacity derives capacity from token usage and latest quota snapshot", () => {
+      vi.useFakeTimers();
+      const now = 1000000000000;
+      vi.setSystemTime(new Date(now));
+
+      const stored: AccountStorageV4 = {
+        version: 4,
+        accounts: [
+          { refreshToken: "r1", addedAt: 1, lastUsed: 0, enabled: true },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const acc = manager.getAccounts()[0]!;
+
+      manager.recordTokenUsage(acc, "gemini", 20000);
+      manager.recordQuotaSnapshot(acc, "gemini", 0.5, now);
+
+      const empiricalCap = manager.getEmpiricalCapacity(acc, "gemini");
+      expect(empiricalCap).toBe(40000);
+
+      vi.useRealTimers();
+    });
   });
 });

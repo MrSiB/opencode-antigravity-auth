@@ -62,13 +62,25 @@ export interface TokenBucket {
     timestamp: number;
     tokens: number;
 }
+export interface QuotaSnapshot {
+    timestamp: number;
+    remainingFraction: number;
+    family: string;
+}
 export interface AccountTokenUsageState {
     fiveHourBuckets?: TokenBucket[];
     weeklyBuckets?: TokenBucket[];
     fiveHourTokenCap?: Record<string, number>;
     weeklyTokenCap?: Record<string, number>;
     last429Ts?: Record<string, number>;
+    quotaSnapshots?: QuotaSnapshot[];
 }
+/**
+ * Calculates empirical capacity from tokens used and remaining fraction.
+ * Formula: Math.round(tokensUsed / Math.max(0.01, 1.0 - remainingFraction))
+ * Returns number when tokensUsed > 10000 and 0.0 <= remainingFraction <= 0.99, else undefined.
+ */
+export declare function calculateEmpiricalCapacity(tokensUsed: number, remainingFraction?: number): number | undefined;
 export interface AccountMetadataV3 {
     email?: string;
     tag?: string;
