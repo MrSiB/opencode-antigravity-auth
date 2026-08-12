@@ -47,6 +47,7 @@ import { createAutoUpdateCheckerHook } from "./hooks/auto-update-checker/index.j
 import { loadConfig, initRuntimeConfig, type AntigravityConfig } from "./plugin/config/index.js";
 import { updateOpencodeConfig } from "./plugin/config/updater.js";
 import { createSessionRecoveryHook, getRecoverySuccessToast } from "./plugin/recovery.js";
+import { renderDashboardHtml, buildLocalStatusData } from "./plugin/ui/dashboard.js";
 import { checkAccountsQuota } from "./plugin/quota.js";
 import { initDiskSignatureCache } from "./plugin/cache.js";
 import { createProactiveRefreshQueue, type ProactiveRefreshQueue } from "./plugin/refresh-queue.js";
@@ -145,6 +146,27 @@ export function startEmbeddedProxyServer(port: number = 51128): HttpServer {
 
   const server = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
     try {
+      const host = req.headers.host || `127.0.0.1:${port}`;
+      const urlStr = req.url?.startsWith("http") ? req.url : `http://${host}${req.url || ""}`;
+      const pathname = new URL(urlStr).pathname;
+
+      if (req.method === "GET") {
+        if (pathname === "/status" || pathname === "/status/" || pathname === "/ui" || pathname === "/ui/") {
+          const statusData = buildLocalStatusData(activeAccountManager);
+          const html = renderDashboardHtml(statusData);
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(html);
+          return;
+        }
+
+        if (pathname === "/status/data" || pathname === "/v1/status/data") {
+          const statusData = buildLocalStatusData(activeAccountManager);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(statusData));
+          return;
+        }
+      }
+
       if (!activePluginFetchHandler) {
         await ensureActivePluginFetchHandler();
       }
@@ -160,9 +182,6 @@ export function startEmbeddedProxyServer(port: number = 51128): HttpServer {
         res.end(JSON.stringify({ error: { message: "Antigravity plugin fetch handler initializing..." } }));
         return;
       }
-
-      const host = req.headers.host || `127.0.0.1:${port}`;
-      const urlStr = req.url?.startsWith("http") ? req.url : `http://${host}${req.url || ""}`;
 
       const headers = new Headers();
       for (const [key, value] of Object.entries(req.headers)) {

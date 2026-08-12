@@ -69,7 +69,7 @@ describe("Entry Points and Embedded Proxy Server Tests", () => {
 
   describe("export-public-package postinstall script removal", () => {
     it("generates public/package.json with no postinstall script", () => {
-      const scriptPath = resolve(process.cwd(), "script/export-public-package.mjs");
+      const scriptPath = resolve(process.cwd(), "scripts/export-public-package.mjs");
       expect(existsSync(scriptPath)).toBe(true);
 
       execSync(`node "${scriptPath}"`, { stdio: "pipe" });
