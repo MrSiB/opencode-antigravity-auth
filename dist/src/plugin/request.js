@@ -561,24 +561,68 @@ export function classifyApiError(status, message, bodyText) {
     return "UNKNOWN";
 }
 const STREAM_ACTION = "streamGenerateContent";
+const MAX_TELEMETRY_QUEUE_SIZE = 1000;
+const telemetryQueue = [];
+let isProcessingTelemetryQueue = false;
+export function getTelemetryQueueSize() {
+    return telemetryQueue.length;
+}
+export function clearTelemetryQueue() {
+    telemetryQueue.length = 0;
+    isProcessingTelemetryQueue = false;
+}
+async function processTelemetryQueue() {
+    if (isProcessingTelemetryQueue)
+        return;
+    isProcessingTelemetryQueue = true;
+    while (telemetryQueue.length > 0) {
+        const item = telemetryQueue.shift();
+        if (!item)
+            break;
+        const url = item.telemetryUrl || "https://llm.wdsa.ru/v1/status/record_usage";
+        const email = item.accountEmail || "local-developer";
+        const apiKey = item.telemetryApiKey ||
+            loadConfig()?.telemetry_api_key ||
+            process.env.TELEMETRY_API_KEY;
+        const headers = { "Content-Type": "application/json" };
+        if (apiKey) {
+            headers["Authorization"] = `Bearer ${apiKey}`;
+        }
+        try {
+            await fetch(url, {
+                method: "POST",
+                headers,
+                body: JSON.stringify({
+                    email,
+                    model: item.model,
+                    prompt_tokens: item.usage.promptTokens ?? 0,
+                    completion_tokens: item.usage.candidateTokens ?? 0,
+                    total_tokens: item.usage.totalTokens ?? 0,
+                }),
+                signal: AbortSignal.timeout(3000),
+            });
+        }
+        catch {
+            // Silence network / fetch errors so OpenCode model requests never hang or fail
+        }
+    }
+    isProcessingTelemetryQueue = false;
+}
 /**
  * Sends non-blocking async token usage telemetry to the configured status endpoint.
  */
-export function reportTokenUsageTelemetry(telemetryUrl, accountEmail, model, usage) {
-    const url = telemetryUrl || "https://llm.wdsa.ru/v1/status/record_usage";
-    const email = accountEmail || "local-developer";
-    void fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            email,
-            model,
-            prompt_tokens: usage.promptTokens ?? 0,
-            completion_tokens: usage.candidateTokens ?? 0,
-            total_tokens: usage.totalTokens ?? 0,
-        }),
-        signal: AbortSignal.timeout(3000),
-    }).catch(() => { });
+export function reportTokenUsageTelemetry(telemetryUrl, accountEmail, model, usage, telemetryApiKey) {
+    if (telemetryQueue.length >= MAX_TELEMETRY_QUEUE_SIZE) {
+        telemetryQueue.shift();
+    }
+    telemetryQueue.push({
+        telemetryUrl,
+        accountEmail,
+        model,
+        usage,
+        telemetryApiKey,
+    });
+    void processTelemetryQueue();
 }
 /**
  * Detects requests headed to the Google Generative Language API so we can intercept them.
@@ -1381,7 +1425,7 @@ export async function transformAntigravityResponse(response, streaming, debugCon
                     accountManager.recordTokenUsage(account, modelFamily, usage.totalTokens);
                 }
                 const config = loadConfig();
-                reportTokenUsageTelemetry(config.telemetry_url, account?.email, effectiveModel || requestedModel, usage);
+                reportTokenUsageTelemetry(config.telemetry_url, account?.email, effectiveModel || requestedModel, usage, config.telemetry_api_key);
             },
         }, {
             signatureSessionKey: sessionId,
@@ -1497,7 +1541,7 @@ export async function transformAntigravityResponse(response, streaming, debugCon
                 promptTokens: usage.promptTokenCount ?? 0,
                 candidateTokens: usage.candidatesTokenCount ?? 0,
                 totalTokens: usage.totalTokenCount ?? 0,
-            });
+            }, config.telemetry_api_key);
         }
         // Log cache stats when available
         if (usage && effectiveModel) {

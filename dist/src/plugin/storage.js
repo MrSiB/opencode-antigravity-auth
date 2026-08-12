@@ -207,7 +207,7 @@ export { getConfigDir };
 const LOCK_OPTIONS = {
     stale: 10000,
     retries: {
-        retries: 5,
+        retries: 10,
         minTimeout: 100,
         maxTimeout: 1000,
         factor: 2,
@@ -231,10 +231,18 @@ async function ensureFileExists(path) {
     }
     catch {
         await fs.mkdir(dirname(path), { recursive: true });
-        await fs.writeFile(path, JSON.stringify({ version: 4, accounts: [], activeIndex: 0 }, null, 2), { encoding: "utf-8", mode: 0o600 });
+        try {
+            await fs.writeFile(path, JSON.stringify({ version: 4, accounts: [], activeIndex: 0 }, null, 2), { encoding: "utf-8", mode: 0o600, flag: "wx" });
+        }
+        catch (writeErr) {
+            const code = writeErr.code;
+            if (code !== "EEXIST") {
+                throw writeErr;
+            }
+        }
     }
 }
-async function withFileLock(path, fn) {
+export async function withFileLock(path, fn) {
     await ensureFileExists(path);
     let release = null;
     try {

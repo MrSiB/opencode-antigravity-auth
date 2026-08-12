@@ -756,6 +756,68 @@ export function classifyApiError(status: number, message?: string, bodyText?: st
 
 const STREAM_ACTION = "streamGenerateContent";
 
+export interface TelemetryQueueItem {
+  telemetryUrl: string | undefined;
+  accountEmail: string | undefined;
+  model: string | undefined;
+  usage: { promptTokens?: number; candidateTokens?: number; totalTokens?: number };
+  telemetryApiKey?: string | undefined;
+}
+
+const MAX_TELEMETRY_QUEUE_SIZE = 1000;
+const telemetryQueue: TelemetryQueueItem[] = [];
+let isProcessingTelemetryQueue = false;
+
+export function getTelemetryQueueSize(): number {
+  return telemetryQueue.length;
+}
+
+export function clearTelemetryQueue(): void {
+  telemetryQueue.length = 0;
+  isProcessingTelemetryQueue = false;
+}
+
+async function processTelemetryQueue(): Promise<void> {
+  if (isProcessingTelemetryQueue) return;
+  isProcessingTelemetryQueue = true;
+
+  while (telemetryQueue.length > 0) {
+    const item = telemetryQueue.shift();
+    if (!item) break;
+
+    const url = item.telemetryUrl || "https://llm.wdsa.ru/v1/status/record_usage";
+    const email = item.accountEmail || "local-developer";
+    const apiKey =
+      item.telemetryApiKey ||
+      (loadConfig() as Record<string, any>)?.telemetry_api_key ||
+      process.env.TELEMETRY_API_KEY;
+
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) {
+      headers["Authorization"] = `Bearer ${apiKey}`;
+    }
+
+    try {
+      await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          email,
+          model: item.model,
+          prompt_tokens: item.usage.promptTokens ?? 0,
+          completion_tokens: item.usage.candidateTokens ?? 0,
+          total_tokens: item.usage.totalTokens ?? 0,
+        }),
+        signal: AbortSignal.timeout(3000),
+      });
+    } catch {
+      // Silence network / fetch errors so OpenCode model requests never hang or fail
+    }
+  }
+
+  isProcessingTelemetryQueue = false;
+}
+
 /**
  * Sends non-blocking async token usage telemetry to the configured status endpoint.
  */
@@ -764,21 +826,21 @@ export function reportTokenUsageTelemetry(
   accountEmail: string | undefined,
   model: string | undefined,
   usage: { promptTokens?: number; candidateTokens?: number; totalTokens?: number },
+  telemetryApiKey?: string | undefined,
 ): void {
-  const url = telemetryUrl || "https://llm.wdsa.ru/v1/status/record_usage";
-  const email = accountEmail || "local-developer";
-  void fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email,
-      model,
-      prompt_tokens: usage.promptTokens ?? 0,
-      completion_tokens: usage.candidateTokens ?? 0,
-      total_tokens: usage.totalTokens ?? 0,
-    }),
-    signal: AbortSignal.timeout(3000),
-  }).catch(() => {});
+  if (telemetryQueue.length >= MAX_TELEMETRY_QUEUE_SIZE) {
+    telemetryQueue.shift();
+  }
+
+  telemetryQueue.push({
+    telemetryUrl,
+    accountEmail,
+    model,
+    usage,
+    telemetryApiKey,
+  });
+
+  void processTelemetryQueue();
 }
 
 /**
@@ -1785,6 +1847,7 @@ export async function transformAntigravityResponse(
             account?.email,
             effectiveModel || requestedModel,
             usage,
+            config.telemetry_api_key,
           );
         },
       },
@@ -1929,6 +1992,7 @@ export async function transformAntigravityResponse(
           candidateTokens: usage.candidatesTokenCount ?? 0,
           totalTokens: usage.totalTokenCount ?? 0,
         },
+        config.telemetry_api_key,
       );
     }
 

@@ -389,6 +389,10 @@ export const AntigravityConfigSchema = z.object({
      * @default "https://llm.wdsa.ru/v1/status/record_usage"
      */
     telemetry_url: z.string().url().default("https://llm.wdsa.ru/v1/status/record_usage"),
+    /**
+     * API key for reporting token usage telemetry.
+     */
+    telemetry_api_key: z.string().optional(),
 });
 /**
  * Default configuration values.

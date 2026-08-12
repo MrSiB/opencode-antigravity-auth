@@ -3,6 +3,7 @@
 > **Notice**: This is a custom fork of the original [opencode-antigravity-auth](https://github.com/NoeFabris/opencode-antigravity-auth) repository by [@NoeFabris](https://github.com/NoeFabris).
 
 This fork incorporates several critical stability fixes and enhancements:
+- **Analytics Paradise Suite (v1.6.0)**: Real-time telemetry queue, Executive KPI Glassmorphism Dashboard, 100% accurate token accounting ($\sum \text{Tokens}_i$), theoretical capacity forecasting, live per-bucket reset countdown timers, and embedded local status UI (`http://127.0.0.1:51128/status`).
 - **Node.js v22+ Compatibility**: Corrects the import of `dirname` in `version.js` (imports from `node:path` instead of `node:fs`) preventing launch crashes.
 - **Startup Auth Safe Recovery**: Fixes the race condition where starting with mock API keys (`dummy`) would wipe account credentials. It safely loads accounts from disk instead of truncating database caches.
 - **Fetch Safety Interception**: Added a safety net to request processing that proceeds with rotation if local active accounts exist, even if OpenCode hasn't fully registered the OAuth structure yet.
@@ -15,6 +16,7 @@ Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth
 
 ## What You Get
 
+- **Executive Analytics & Real-Time Dashboard** — real-time token telemetry (5h/7d) with 100% math accuracy, burn-rate (TPM/TPH), live bucket reset countdown timers, and capacity forecasting via embedded local (`http://127.0.0.1:51128/status`) or remote UI. See [Dashboard & Analytics Guide](docs/DASHBOARD.md).
 - **Gemini 3.6 Flash, Gemini 3.5 Flash, Gemini 3.1 Pro, Claude Opus/Sonnet 4.6 Thinking, and GPT-OSS 120B** via Google OAuth
 - **Multi-account support** — add multiple Google accounts, auto-rotates when rate-limited
 - **Antigravity quota routing** — current defaults avoid Gemini CLI models because individual Gemini CLI access sunsets on 2026-06-18
@@ -43,7 +45,7 @@ Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth
 
 ## Installation
 
-> **Внимание!** При установке из исходников (с GitHub) используйте ветку `#latest`. Ознакомьтесь с [документацией по правильной установке из Git](docs/INSTALLATION_FROM_GIT.md).
+> **Notice:** When installing from source (GitHub), use the `#latest` branch. See the [documentation on installing from Git](docs/INSTALLATION_FROM_GIT.md).
 
 
 <details open>
@@ -364,6 +366,22 @@ opencode auth login  # Run again to add more accounts
 - **Manage accounts** — Enable/disable specific accounts for rotation
 
 For details on load balancing, dual quota pools, and account storage, see [docs/MULTI-ACCOUNT.md](docs/MULTI-ACCOUNT.md).
+
+---
+
+## Executive Analytics & Real-Time Dashboard
+
+The plugin includes **Analytics Paradise Suite (v1.6.0)** for monitoring token telemetry, pool capacity, burn rate, and quota resets across all Google accounts.
+
+### Features & Highlights:
+- **100% Accurate Token Accounting**: Total token consumption (5h/7d) is mathematically equal to the sum across all accounts ($\sum \text{Tokens}_i$).
+- **Theoretical Capacity Forecasting**: Calculates remaining tokens ($C_{\text{capacity}} \times R_{\text{remaining}}$) for 5-hour and 7-day windows.
+- **Live Bucket Reset Timers**: Real-time countdowns (`HH:MM:SS` for 5h, `Dd, HHh, MMm` for 7d) showing when each account bucket resets.
+- **Predictive Burn-Rate**: EMA token-per-minute (TPM) / token-per-hour (TPH), Time-to-Exhaustion (TTE) countdown, and 30-day budget projections.
+- **Embedded Local UI**: Accessible at `http://127.0.0.1:51128/status` directly from the local plugin proxy.
+- **Remote Gateway UI**: Hostable Dark Glassmorphism KPI Dashboard (e.g., `https://llm.wdsa.ru/status/`).
+
+For architecture, API spec, and setup instructions, see the **[Dashboard & Analytics Guide](docs/DASHBOARD.md)**.
 
 ---
 
@@ -823,6 +841,7 @@ See the full [Troubleshooting Guide](docs/TROUBLESHOOTING.md) for solutions to c
 
 ## Documentation
 
+- [Dashboard & Analytics Guide](docs/DASHBOARD.md) — Executive KPI dashboard, telemetry & forecasting architecture
 - [Configuration](docs/CONFIGURATION.md) — All configuration options
 - [Multi-Account](docs/MULTI-ACCOUNT.md) — Load balancing, dual quota pools, account storage
 - [Model Variants](docs/MODEL-VARIANTS.md) — Thinking budgets and variant system

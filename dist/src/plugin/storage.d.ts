@@ -144,6 +144,7 @@ export declare function getStoragePath(): string;
  * Gets the config directory path. Exported for use by other modules.
  */
 export { getConfigDir };
+export declare function withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T>;
 export declare function deduplicateAccountsByEmail<T extends {
     email?: string;
     lastUsed?: number;

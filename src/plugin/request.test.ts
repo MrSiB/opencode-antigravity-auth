@@ -5,6 +5,7 @@ import {
   getPluginSessionId,
   isGenerativeLanguageRequest,
   reportTokenUsageTelemetry,
+  clearTelemetryQueue,
   __testExports,
 } from "./request.js";
 import { DEFAULT_CONFIG } from "./config/index.js";
@@ -1281,12 +1282,15 @@ describe("request.ts", () => {
     let fetchSpy: ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
+      clearTelemetryQueue();
       fetchSpy = vi.fn().mockResolvedValue(new Response("ok"));
       vi.stubGlobal("fetch", fetchSpy);
     });
 
     afterEach(() => {
+      clearTelemetryQueue();
       vi.unstubAllGlobals();
+      delete process.env.TELEMETRY_API_KEY;
     });
 
     it("dispatches POST request with correct email, model, prompt_tokens, completion_tokens, and total_tokens", () => {
@@ -1313,6 +1317,54 @@ describe("request.ts", () => {
         total_tokens: 180,
       });
       expect(init.signal).toBeDefined();
+    });
+
+    it("includes Authorization header when telemetryApiKey is provided or TELEMETRY_API_KEY env is set", () => {
+      reportTokenUsageTelemetry(
+        "https://test.telemetry/v1/record",
+        "dev@example.com",
+        "gemini-3.6-flash",
+        { promptTokens: 10, candidateTokens: 10, totalTokens: 20 },
+        "secret-key-123",
+      );
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const call = fetchSpy.mock.calls[0] as [string, RequestInit];
+      const [, init] = call;
+      expect(init.headers).toEqual({
+        "Content-Type": "application/json",
+        Authorization: "Bearer secret-key-123",
+      });
+    });
+
+    it("includes Authorization header from TELEMETRY_API_KEY env var if argument is omitted", () => {
+      process.env.TELEMETRY_API_KEY = "env-secret-key-456";
+      reportTokenUsageTelemetry(
+        "https://test.telemetry/v1/record",
+        "dev@example.com",
+        "gemini-3.6-flash",
+        { promptTokens: 10, candidateTokens: 10, totalTokens: 20 },
+      );
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const call = fetchSpy.mock.calls[0] as [string, RequestInit];
+      const [, init] = call;
+      expect(init.headers).toEqual({
+        "Content-Type": "application/json",
+        Authorization: "Bearer env-secret-key-456",
+      });
+    });
+
+    it("handles queue buffer capacity up to 1000 items without throwing", () => {
+      for (let i = 0; i < 1050; i++) {
+        reportTokenUsageTelemetry(
+          "https://test.telemetry/v1/record",
+          "dev@example.com",
+          "gemini-3.6-flash",
+          { promptTokens: i, candidateTokens: i, totalTokens: i * 2 },
+        );
+      }
+      expect(fetchSpy).toHaveBeenCalled();
     });
 
     it("handles undefined values safely with defaults ('local-developer' and 0)", () => {

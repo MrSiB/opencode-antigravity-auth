@@ -3,10 +3,14 @@ import {
   deduplicateAccountsByEmail,
   migrateV2ToV3,
   loadAccounts,
+  saveAccounts,
+  saveAccountsReplace,
+  withFileLock,
   addTokensToUsageState,
   getRollingTokenUsage,
   type AccountMetadata,
   type AccountStorage,
+  type AccountStorageV4,
 } from "./storage.js";
 import { promises as fs } from "node:fs";
 import {
@@ -575,6 +579,86 @@ describe("Storage Migration", () => {
 
       const usage7d = getRollingTokenUsage(state, "claude", 7 * 24 * 3600 * 1000, after6h);
       expect(usage7d).toBe(12000);
+    });
+  });
+
+  describe("Atomic Storage & File Locking", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("withFileLock executes function inside acquired lock", async () => {
+      const mockFn = vi.fn().mockResolvedValue("result");
+      const result = await withFileLock("/tmp/test-storage.json", mockFn);
+
+      expect(result).toBe("result");
+      expect(mockFn).toHaveBeenCalledTimes(1);
+    });
+
+    it("saveAccounts writes to atomic temp file and renames", async () => {
+      const dummyStorage: AccountStorageV4 = {
+        version: 4,
+        accounts: [
+          {
+            refreshToken: "token-save-1",
+            addedAt: Date.now(),
+            lastUsed: Date.now(),
+          },
+        ],
+        activeIndex: 0,
+      };
+
+      vi.mocked(fs.readFile).mockImplementation((path) => {
+        if ((path as string).endsWith(".gitignore")) {
+          return Promise.reject({ code: "ENOENT" });
+        }
+        return Promise.resolve(JSON.stringify(dummyStorage));
+      });
+
+      await saveAccounts(dummyStorage);
+
+      expect(fs.writeFile).toHaveBeenCalled();
+      const tmpCall = vi.mocked(fs.writeFile).mock.calls.find(
+        (call) => (call[0] as string).includes(".tmp")
+      );
+      expect(tmpCall).toBeDefined();
+      expect(fs.rename).toHaveBeenCalled();
+    });
+
+    it("saveAccountsReplace writes to atomic temp file and renames without merge", async () => {
+      const dummyStorage: AccountStorageV4 = {
+        version: 4,
+        accounts: [
+          {
+            refreshToken: "token-replace-1",
+            addedAt: Date.now(),
+            lastUsed: Date.now(),
+          },
+        ],
+        activeIndex: 0,
+      };
+
+      await saveAccountsReplace(dummyStorage);
+
+      expect(fs.writeFile).toHaveBeenCalled();
+      const tmpCall = vi.mocked(fs.writeFile).mock.calls.find(
+        (call) => (call[0] as string).includes(".tmp")
+      );
+      expect(tmpCall).toBeDefined();
+      expect(fs.rename).toHaveBeenCalled();
+    });
+
+    it("cleans up temp file if save operation fails", async () => {
+      vi.mocked(fs.rename).mockRejectedValueOnce(new Error("Disk error"));
+
+      const dummyStorage: AccountStorageV4 = {
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+      };
+
+      await expect(saveAccountsReplace(dummyStorage)).rejects.toThrow("Disk error");
+      expect(fs.unlink).toHaveBeenCalled();
     });
   });
 });

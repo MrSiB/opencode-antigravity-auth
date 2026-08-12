@@ -36,6 +36,19 @@ export declare function isModelUnavailableError(status: number, message?: string
  * Maps HTTP 404 / NOT_FOUND / "Requested entity was not found" to "MODEL_UNAVAILABLE".
  */
 export declare function classifyApiError(status: number, message?: string, bodyText?: string): string;
+export interface TelemetryQueueItem {
+    telemetryUrl: string | undefined;
+    accountEmail: string | undefined;
+    model: string | undefined;
+    usage: {
+        promptTokens?: number;
+        candidateTokens?: number;
+        totalTokens?: number;
+    };
+    telemetryApiKey?: string | undefined;
+}
+export declare function getTelemetryQueueSize(): number;
+export declare function clearTelemetryQueue(): void;
 /**
  * Sends non-blocking async token usage telemetry to the configured status endpoint.
  */
@@ -43,7 +56,7 @@ export declare function reportTokenUsageTelemetry(telemetryUrl: string | undefin
     promptTokens?: number;
     candidateTokens?: number;
     totalTokens?: number;
-}): void;
+}, telemetryApiKey?: string | undefined): void;
 /**
  * Detects requests headed to the Google Generative Language API so we can intercept them.
  */

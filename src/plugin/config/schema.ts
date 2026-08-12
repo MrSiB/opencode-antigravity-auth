@@ -452,6 +452,11 @@ export const AntigravityConfigSchema = z.object({
    */
   telemetry_url: z.string().url().default("https://llm.wdsa.ru/v1/status/record_usage"),
 
+  /**
+   * API key for reporting token usage telemetry.
+   */
+  telemetry_api_key: z.string().optional(),
+
 });
 
 export type AntigravityConfig = z.infer<typeof AntigravityConfigSchema>;

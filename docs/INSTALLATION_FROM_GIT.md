@@ -1,44 +1,49 @@
-# Установка плагина из GitHub
+# Installing the Plugin from GitHub
 
-## Описание проблемы с установкой из исходников
-При попытке установить плагин напрямую из ветки `main` (или из исходников) через команду `opencode plugin mrsib/opencode-antigravity-auth` может возникать ошибка встроенного пакетного менеджера `bun`:
+## Source Installation Issues
+
+When attempting to install the plugin directly from the `main` branch (or from source) using `opencode plugin mrsib/opencode-antigravity-auth`, Bun's embedded package manager may raise the following error:
 `git dep preparation failed`
 
-**Причины ошибки:**
-1. Пакетный менеджер пытается подготовить git-зависимость и выполняет скрипты хуков (например, `prepublishOnly`, `prepare`, `postinstall`), которые могут падать, если в окружении не установлены глобальные зависимости (например, `tsc`, `typescript` и др.).
-2. Существует известный баг `bun` (DependencyLoop), который приводит к падению, если зависимость (например, `typescript`) указана одновременно в `dependencies` и `devDependencies`.
+**Root Causes:**
+1. The package manager attempts to prepare a Git dependency by executing lifecycle hooks (e.g., `prepublishOnly`, `prepare`, `postinstall`), which fail if build-time tools (such as `tsc` or `typescript`) are not available in the global environment.
+2. A known Bun issue (`DependencyLoop`) triggers build failures when a package (e.g., `typescript`) is listed simultaneously in both `dependencies` and `devDependencies`.
 
-Поскольку плагин должен собираться перед использованием, установка исходного кода требует последующей компиляции. Чтобы обойти эти сложности, плагин поставляется в виде уже скомпилированного и "чистого" пакета.
-
-## Решение: Установка из ветки `latest`
-
-Для правильной установки плагина на чистом сервере необходимо использовать специальную ветку сборки — `latest` (или `release`).
-Эта ветка содержит только **готовые скомпилированные файлы** (`dist/`) и **очищенный `package.json`** без скриптов сборки (в нем полностью удалены секции `scripts` и `devDependencies`).
-
-### Команда установки
-```bash
-opencode plugin mrsib/opencode-antigravity-auth#latest -g -f
-```
-Эта команда скачает готовую сборку плагина и установит ее глобально. Благодаря отсутствию скриптов жизненного цикла в `package.json`, `bun` не будет пытаться что-либо скомпилировать, и установка пройдет мгновенно и без ошибок.
+Because the plugin must be compiled before use, installing raw source code requires post-install compilation. To eliminate these issues, pre-compiled release artifacts are provided in a clean build branch.
 
 ---
 
-## Для разработчиков: Как обновить ветку сборки
+## Solution: Installing from the `latest` Branch
 
-Если вы внесли изменения в исходный код (в ветке `main`), вам необходимо пересобрать плагин и обновить ветку `latest`. Для этого предусмотрен специальный скрипт.
+For a clean installation on any environment, use the dedicated release branch — `#latest` (or `#release`).
+This branch contains only **pre-compiled distribution files** (`dist/`) and a **sanitized `package.json`** with lifecycle `scripts` and `devDependencies` completely stripped out.
 
-### Шаг 1. Экспорт чистой сборки
-Выполните скрипт экспорта:
+### Installation Command
 ```bash
-node script/export-public-package.mjs
+opencode plugin mrsib/opencode-antigravity-auth#latest -g -f
 ```
-Скрипт автоматически:
-1. Запустит сборку (`npm run build`).
-2. Скопирует результат (включая папку `dist`, `assets`, `README.md`, `LICENSE`) в папку `public/`.
-3. Создаст чистый `package.json` внутри `public/`, удалив из него секции `scripts` и `devDependencies`.
 
-### Шаг 2. Публикация ветки `latest`
-Перейдите в папку `public/` и принудительно запушьте ее содержимое в ветку `latest` (или `release`):
+This command downloads the compiled release artifact and installs it globally. Because the `package.json` contains no build lifecycle scripts, Bun will not attempt to compile the source code, ensuring an instantaneous and error-free installation.
+
+---
+
+## For Developers: Updating the Build Branch
+
+If you make source code changes in the `main` branch, you must re-compile the plugin and publish the updated `latest` branch.
+
+### Step 1. Export Clean Build Artifacts
+Run the export script:
+```bash
+npm run export:public
+```
+
+The script automatically:
+1. Runs the TypeScript build (`npm run build`).
+2. Copies build output (including `dist/`, `assets/`, `README.md`, `LICENSE`, `docs/`) to the `./public/` directory.
+3. Generates a clean `package.json` inside `./public/`, stripping `scripts` and `devDependencies`.
+
+### Step 2. Publish to the `latest` Branch
+Navigate to the `./public/` folder and push its contents to the `latest` branch:
 ```bash
 cd public
 git init
@@ -46,4 +51,5 @@ git add .
 git commit -m "release: fully clean package.json"
 git push -f git@github.com:mrsib/opencode-antigravity-auth.git HEAD:latest
 ```
-После этого обновленная сборка станет доступна всем пользователям для чистой установки.
+
+The updated release build is now immediately available for clean global installation.
