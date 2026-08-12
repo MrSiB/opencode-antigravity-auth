@@ -828,6 +828,10 @@ export function reportTokenUsageTelemetry(
   usage: { promptTokens?: number; candidateTokens?: number; totalTokens?: number },
   telemetryApiKey?: string | undefined,
 ): void {
+  if (!accountEmail || accountEmail === "local-developer" || accountEmail.includes("example.com")) {
+    return;
+  }
+
   if (telemetryQueue.length >= MAX_TELEMETRY_QUEUE_SIZE) {
     telemetryQueue.shift();
   }

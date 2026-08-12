@@ -612,6 +612,9 @@ async function processTelemetryQueue() {
  * Sends non-blocking async token usage telemetry to the configured status endpoint.
  */
 export function reportTokenUsageTelemetry(telemetryUrl, accountEmail, model, usage, telemetryApiKey) {
+    if (!accountEmail || accountEmail === "local-developer" || accountEmail.includes("example.com")) {
+        return;
+    }
     if (telemetryQueue.length >= MAX_TELEMETRY_QUEUE_SIZE) {
         telemetryQueue.shift();
     }
