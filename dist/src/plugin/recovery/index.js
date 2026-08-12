@@ -1,5 +1,5 @@
 /**
- * Session recovery module for @MrSiB/opencode-antigravity-auth.
+ * Session recovery module for @mrsib/opencode-antigravity-auth.
  *
  * Provides recovery from:
  * - tool_result_missing: Interrupted tool executions

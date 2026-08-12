@@ -1,5 +1,5 @@
 /**
- * Configuration module for @MrSiB/opencode-antigravity-auth plugin.
+ * Configuration module for @mrsib/opencode-antigravity-auth plugin.
  *
  * @example
  * ```typescript

@@ -46,7 +46,7 @@ export interface UpdateConfigOptions {
 // Constants
 // =============================================================================
 
-const PACKAGE_NAME = "@MrSiB/opencode-antigravity-auth";
+const PACKAGE_NAME = "@mrsib/opencode-antigravity-auth";
 const LEGACY_PACKAGE_NAME = "opencode-antigravity-auth";
 const PLUGIN_NAME = `${PACKAGE_NAME}@latest`;
 const SCHEMA_URL = "https://opencode.ai/config.json";
@@ -55,9 +55,14 @@ const OPENCODE_JSON_FILENAME = "opencode.json";
 const OPENCODE_JSONC_FILENAME = "opencode.jsonc";
 
 function isPluginEntry(entry: string): boolean {
+  const lowerEntry = entry.toLowerCase();
   return (
     entry === PACKAGE_NAME ||
     entry.startsWith(`${PACKAGE_NAME}@`) ||
+    lowerEntry === "@mrsib/opencode-antigravity-auth" ||
+    lowerEntry.startsWith("@mrsib/opencode-antigravity-auth@") ||
+    lowerEntry === "@mrsib/opencode-antigravity-auth" ||
+    lowerEntry.startsWith("@mrsib/opencode-antigravity-auth@") ||
     entry === LEGACY_PACKAGE_NAME ||
     entry.startsWith(`${LEGACY_PACKAGE_NAME}@`) ||
     entry.includes("opencode-antigravity-auth")

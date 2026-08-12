@@ -1,5 +1,5 @@
 /**
- * Configuration schema for @MrSiB/opencode-antigravity-auth plugin.
+ * Configuration schema for @mrsib/opencode-antigravity-auth plugin.
  * 
  * Config file locations (in priority order, highest wins):
  * - Project: .opencode/antigravity.json
