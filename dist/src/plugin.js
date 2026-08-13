@@ -1364,8 +1364,7 @@ export const createAntigravityPlugin = (providerId) => async (ctx) => {
                     if (!isGenerativeLanguageRequest(input)) {
                         return nativeFetch(input, init);
                     }
-                    const latestAuth = await getAuth();
-                    if (!isOAuthAuth(latestAuth) && accountManager.getAccountCount() === 0) {
+                    if (accountManager.getAccountCount() === 0) {
                         return fetch(input, init);
                     }
                     if (accountManager.getAccountCount() === 0) {
