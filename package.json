@@ -35,6 +35,7 @@
     ],
     "scripts": {
         "build": "tsc -p tsconfig.build.json && node scripts/fix-dist-imports.mjs",
+        "prepare": "npm run build",
         "build:schema": "npx tsx script/build-schema.ts",
         "typecheck": "tsc --noEmit",
         "test": "vitest run",
