@@ -118,15 +118,6 @@ export const OPENCODE_MODEL_DEFINITIONS: OpencodeModelDefinitions = {
       high: { thinkingLevel: "high" },
     },
   },
-  "antigravity-gemini-3.7-pro": {
-    name: "Gemini 3.7 Pro (Antigravity)",
-    limit: { context: 1048576, output: 65535 },
-    modalities: DEFAULT_MODALITIES,
-    variants: {
-      low: { thinkingLevel: "low" },
-      high: { thinkingLevel: "high" },
-    },
-  },
   "antigravity-claude-sonnet-4-6": {
     name: "Claude Sonnet 4.6 (Antigravity)",
     limit: { context: 200000, output: 64000 },
@@ -191,15 +182,6 @@ export const OPENCODE_MODEL_DEFINITIONS: OpencodeModelDefinitions = {
     variants: {
       low: { thinkingLevel: "low" },
       medium: { thinkingLevel: "medium" },
-      high: { thinkingLevel: "high" },
-    },
-  },
-  "gemini-3.7-pro": {
-    name: "Gemini 3.7 Pro (Gemini CLI)",
-    limit: { context: 1048576, output: 65535 },
-    modalities: DEFAULT_MODALITIES,
-    variants: {
-      low: { thinkingLevel: "low" },
       high: { thinkingLevel: "high" },
     },
   },
