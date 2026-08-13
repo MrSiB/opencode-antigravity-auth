@@ -88,6 +88,22 @@ function dedupeCredentials(credentials: AgySdkCredential[]): AgySdkCredential[] 
   return result;
 }
 
+export function isDummyApiKey(key?: string | null): boolean {
+  if (!key) return true;
+  const k = key.trim().toLowerCase();
+  return (
+    k === "" ||
+    k === "dummy" ||
+    k === "antigravity-dummy-key" ||
+    k === "opencode-antigravity-auth" ||
+    k === "undefined" ||
+    k === "null" ||
+    k === "placeholder" ||
+    k.startsWith("opencode-antigravity") ||
+    k.startsWith("dummy")
+  );
+}
+
 export function getAgySdkCredentials(
   config: AntigravityConfig,
   auth?: ApiKeyAuthDetails | null,
@@ -95,12 +111,13 @@ export function getAgySdkCredentials(
   if (!config.agy_sdk.enabled) return [];
 
   const credentials: AgySdkCredential[] = [];
-  if (auth?.key?.trim()) {
+  if (auth?.key?.trim() && !isDummyApiKey(auth.key)) {
     credentials.push({ label: "opencode api key", apiKey: auth.key.trim() });
   }
 
   for (const project of config.agy_sdk.cloud_projects) {
     if (project.enabled === false) continue;
+    if (!project.api_key?.trim() || isDummyApiKey(project.api_key)) continue;
     credentials.push({
       label: project.label?.trim() || project.project_id?.trim() || "cloud project",
       apiKey: project.api_key.trim(),
@@ -115,7 +132,7 @@ export function getAgySdkCredentials(
     ...envKeys,
   ]
     .map((apiKey) => apiKey?.trim())
-    .filter((apiKey): apiKey is string => Boolean(apiKey));
+    .filter((apiKey): apiKey is string => Boolean(apiKey) && !isDummyApiKey(apiKey));
   for (const apiKey of envCandidates) {
     credentials.push({ label: "environment", apiKey });
   }

@@ -6,3 +6,4 @@ export {
   SignatureCache,
   createSignatureCache,
 } from "./signature-cache";
+export * from "../cache.js";

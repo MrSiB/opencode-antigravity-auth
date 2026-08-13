@@ -701,7 +701,7 @@ it("removes API key headers", () => {
       const headers = result.init.headers as Headers;
       expect(headers.get("User-Agent")).toBe("google-api-nodejs-client/9.15.1");
       expect(headers.get("X-Goog-Api-Client")).toBe("gl-node/22.17.0");
-      expect(headers.get("Client-Metadata")).toBe("ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI");
+      expect(headers.get("Client-Metadata")).toBe('{"ideType":"ANTIGRAVITY","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}');
     });
 
     it("builds gemini-cli wrapped body without antigravity-only fields", () => {
@@ -1546,7 +1546,7 @@ it("removes API key headers", () => {
         undefined,
         "gemini-2.5-pro",
         "test-project",
-        "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:generateContent",
+        "https://cloudcode-pa.googleapis.com/v1internal:generateContent",
         "gemini-2.5-pro",
         "session-1",
         0,
@@ -1554,7 +1554,7 @@ it("removes API key headers", () => {
         undefined,
         [
           "status=500 INTERNAL",
-          "endpoint=https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:generateContent",
+          "endpoint=https://cloudcode-pa.googleapis.com/v1internal:generateContent",
           "account=test@example.com",
         ],
       );
@@ -1562,7 +1562,7 @@ it("removes API key headers", () => {
       const bodyText = await transformed.text();
       expect(bodyText).toContain("[ThinkingResolution]");
       expect(bodyText).toContain("status=500 INTERNAL");
-      expect(bodyText).toContain("endpoint=https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:generateContent");
+      expect(bodyText).toContain("endpoint=https://cloudcode-pa.googleapis.com/v1internal:generateContent");
       expect(bodyText).toContain("account=test@example.com");
 
       initializeDebug(DEFAULT_CONFIG);
@@ -1589,7 +1589,7 @@ it("removes API key headers", () => {
         undefined,
         "antigravity-claude-opus-4-6-thinking",
         "test-project",
-        "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:streamGenerateContent?alt=sse",
+        "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
         "claude-opus-4-6-thinking",
         "session-1",
         0,
@@ -1621,7 +1621,7 @@ it("removes API key headers", () => {
           undefined,
           "antigravity-claude-opus-4-6-thinking",
           "test-project",
-          "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:streamGenerateContent?alt=sse",
+          "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
           "claude-opus-4-6-thinking",
           "session-1",
         ),

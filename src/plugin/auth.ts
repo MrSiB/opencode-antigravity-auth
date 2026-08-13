@@ -10,7 +10,9 @@ export function isOAuthAuth(auth: AuthDetails): auth is OAuthAuthDetails {
  * Splits a packed refresh string into its constituent refresh token and project IDs.
  */
 export function parseRefreshParts(refresh: string): RefreshParts {
-  const [refreshToken = "", projectId = "", managedProjectId = ""] = (refresh ?? "").split("|");
+  const [refreshToken = "", rawProjectId = "", rawManagedProjectId = ""] = (refresh ?? "").split("|");
+  const projectId = rawProjectId === "infinite-provider-f7c1c" || rawProjectId === "rising-fact-p41fc" ? "" : rawProjectId;
+  const managedProjectId = rawManagedProjectId === "infinite-provider-f7c1c" || rawManagedProjectId === "rising-fact-p41fc" ? "" : rawManagedProjectId;
   return {
     refreshToken,
     projectId: projectId || undefined,
@@ -22,9 +24,11 @@ export function parseRefreshParts(refresh: string): RefreshParts {
  * Serializes refresh token parts into the stored string format.
  */
 export function formatRefreshParts(parts: RefreshParts): string {
-  const projectSegment = parts.projectId ?? "";
+  const cleanProj = (parts.projectId === "infinite-provider-f7c1c" || parts.projectId === "rising-fact-p41fc") ? undefined : parts.projectId;
+  const cleanManaged = (parts.managedProjectId === "infinite-provider-f7c1c" || parts.managedProjectId === "rising-fact-p41fc") ? undefined : parts.managedProjectId;
+  const projectSegment = cleanProj ?? "";
   const base = `${parts.refreshToken}|${projectSegment}`;
-  return parts.managedProjectId ? `${base}|${parts.managedProjectId}` : base;
+  return cleanManaged ? `${base}|${cleanManaged}` : base;
 }
 
 /**

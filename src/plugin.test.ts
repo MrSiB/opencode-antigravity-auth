@@ -141,17 +141,22 @@ describe("createAntigravityPlugin provider models", () => {
   });
 
   it("does not expose API-key auth secret as loader apiKey", async () => {
-    const plugin = await createAntigravityPlugin("google")({
-      client,
-      directory: process.cwd(),
-    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("[]", { status: 200 })));
+    try {
+      const plugin = await createAntigravityPlugin("google")({
+        client,
+        directory: process.cwd(),
+      });
 
-    const loader = await plugin.auth.loader(
-      async () => ({ type: "api", key: "secret" }),
-      {},
-    );
+      const loader = await plugin.auth.loader(
+        async () => ({ type: "api", key: "secret" }),
+        {},
+      );
 
-    expect(loader).toMatchObject({ apiKey: "" });
+      expect(loader).toMatchObject({ apiKey: "" });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -216,7 +221,7 @@ describe("createAntigravityPlugin auth.loader disk OAuth promotion", () => {
       );
 
       // Both branches return apiKey: "" — this only confirms loader was constructed.
-      expect(loader).toMatchObject({ apiKey: "" });
+    expect(loader).toMatchObject({ apiKey: "" });
       expect(loader).toHaveProperty("fetch");
 
       // Before the fix: this URL took the API-key-only branch and returned a

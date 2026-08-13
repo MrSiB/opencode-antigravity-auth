@@ -15,7 +15,7 @@ const projectContextPendingCache = new Map<string, Promise<ProjectContextResult>
 
 const CODE_ASSIST_METADATA = {
   ideType: "ANTIGRAVITY",
-  platform: process.platform === "win32" ? "WINDOWS" : "MACOS",
+  platform: "PLATFORM_UNSPECIFIED",
   pluginType: "GEMINI",
 } as const;
 
@@ -261,7 +261,7 @@ export async function ensureProjectContext(auth: OAuthAuthDetails): Promise<Proj
     };
 
     // Try to resolve a managed project from Antigravity if possible.
-    const loadPayload = await loadManagedProject(accessToken, parts.projectId ?? fallbackProjectId);
+    const loadPayload = await loadManagedProject(accessToken, parts.projectId);
     const resolvedManagedProjectId = extractManagedProjectId(loadPayload);
 
     if (resolvedManagedProjectId) {
@@ -292,8 +292,8 @@ export async function ensureProjectContext(auth: OAuthAuthDetails): Promise<Proj
       return { auth, effectiveProjectId: parts.projectId };
     }
 
-    // No project id present in auth; fall back to the hardcoded id for requests.
-    return { auth, effectiveProjectId: fallbackProjectId };
+    // No project id present in auth; return empty string so requests do not send an invalid hardcoded project.
+    return { auth, effectiveProjectId: "" };
   };
 
   if (!cacheKey) {

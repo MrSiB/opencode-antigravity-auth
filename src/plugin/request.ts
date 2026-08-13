@@ -70,6 +70,7 @@ import {
   resolveModelForHeaderStyle,
   resolveAntigravityGemini35FlashBackendModel,
   resolveAntigravityGemini36FlashBackendModel,
+  resolveAntigravityGemini37FlashBackendModel,
   getDefaultGemini3ThinkingLevel,
   isClaudeModel,
   isClaudeThinkingModel,
@@ -1344,6 +1345,11 @@ export function prepareAntigravityRequest(
         }
 
         if (headerStyle === "antigravity") {
+          const gemini37FlashBackendModel =
+            resolveAntigravityGemini37FlashBackendModel(
+              effectiveModel,
+              tierThinkingLevel,
+            );
           const gemini36FlashBackendModel =
             resolveAntigravityGemini36FlashBackendModel(
               effectiveModel,
@@ -1354,7 +1360,10 @@ export function prepareAntigravityRequest(
               effectiveModel,
               tierThinkingLevel,
             );
-          if (gemini36FlashBackendModel) {
+          if (gemini37FlashBackendModel) {
+            effectiveModel = gemini37FlashBackendModel;
+            wrappedBody.model = gemini37FlashBackendModel;
+          } else if (gemini36FlashBackendModel) {
             effectiveModel = gemini36FlashBackendModel;
             wrappedBody.model = gemini36FlashBackendModel;
           } else if (gemini35FlashBackendModel) {
@@ -1488,6 +1497,11 @@ export function prepareAntigravityRequest(
         }
 
         if (headerStyle === "antigravity") {
+          const gemini37FlashBackendModel =
+            resolveAntigravityGemini37FlashBackendModel(
+              effectiveModel,
+              tierThinkingLevel,
+            );
           const gemini36FlashBackendModel =
             resolveAntigravityGemini36FlashBackendModel(
               effectiveModel,
@@ -1498,7 +1512,9 @@ export function prepareAntigravityRequest(
               effectiveModel,
               tierThinkingLevel,
             );
-          if (gemini36FlashBackendModel) {
+          if (gemini37FlashBackendModel) {
+            effectiveModel = gemini37FlashBackendModel;
+          } else if (gemini36FlashBackendModel) {
             effectiveModel = gemini36FlashBackendModel;
           } else if (gemini35FlashBackendModel) {
             effectiveModel = gemini35FlashBackendModel;
@@ -2179,9 +2195,7 @@ export function prepareAntigravityRequest(
             : undefined,
         );
 
-        const effectiveProjectId =
-          projectId?.trim() ||
-          (headerStyle === "antigravity" ? generateSyntheticProjectId() : "");
+        const effectiveProjectId = projectId?.trim() || "";
         resolvedProjectId = effectiveProjectId;
 
         // Inject Antigravity system instruction with role "user" (CLIProxyAPI v6.6.89 compatibility)

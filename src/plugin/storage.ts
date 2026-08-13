@@ -975,8 +975,20 @@ export async function loadAccounts(): Promise<AccountStorageV4 | null> {
       },
     );
 
+    // Sanitize accounts to strip legacy synthetic project IDs
+    const sanitizedAccounts = validAccounts.map((acc) => {
+      const copy = { ...acc };
+      if (copy.projectId === "infinite-provider-f7c1c" || copy.projectId === "rising-fact-p41fc") {
+        delete copy.projectId;
+      }
+      if (copy.managedProjectId === "infinite-provider-f7c1c" || copy.managedProjectId === "rising-fact-p41fc") {
+        delete copy.managedProjectId;
+      }
+      return copy;
+    });
+
     // Deduplicate accounts by email (keeps newest entry for each email)
-    const deduplicatedAccounts = deduplicateAccountsByEmail(validAccounts);
+    const deduplicatedAccounts = deduplicateAccountsByEmail(sanitizedAccounts);
 
     const activeIndex = remapActiveIndex(
       validAccounts,

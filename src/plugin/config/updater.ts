@@ -64,6 +64,62 @@ export function getOpencodeConfigDir(): string {
 }
 
 /**
+ * Get the opencode auth.json file path (~/.local/share/opencode/auth.json).
+ */
+export function getOpencodeAuthJsonPath(): string {
+  const xdgData = process.env.XDG_DATA_HOME || join(homedir(), ".local/share");
+  return join(xdgData, "opencode", "auth.json");
+}
+
+/**
+ * Automatically syncs OpenCode's ~/.local/share/opencode/auth.json with stored Antigravity accounts.
+ * Prevents "API key not valid" error caused by missing OpenCode Google OAuth credential entry.
+ */
+export function syncOpencodeAuthJson(): void {
+  try {
+    const accountsPath = join(getOpencodeConfigDir(), "antigravity-accounts.json");
+    if (!existsSync(accountsPath)) return;
+
+    const accountsContent = readFileSync(accountsPath, "utf-8");
+    const accountsData = JSON.parse(accountsContent) as { accounts?: Array<{ refreshToken?: string }> };
+    const firstAccount = accountsData.accounts?.[0];
+    if (!firstAccount?.refreshToken) return;
+
+    const rawRefreshToken = firstAccount.refreshToken.split("|")[0]?.trim();
+    if (!rawRefreshToken) return;
+
+    const authJsonPath = getOpencodeAuthJsonPath();
+    let authData: Record<string, unknown> = {};
+
+    if (existsSync(authJsonPath)) {
+      try {
+        const content = readFileSync(authJsonPath, "utf-8");
+        authData = JSON.parse(content) as Record<string, unknown>;
+      } catch {
+        authData = {};
+      }
+    }
+
+    if (!authData.google) {
+      authData.google = {
+        type: "oauth",
+        refresh: rawRefreshToken,
+        access: "",
+        expires: 0,
+      };
+
+      const authDir = dirname(authJsonPath);
+      if (!existsSync(authDir)) {
+        mkdirSync(authDir, { recursive: true });
+      }
+      writeFileSync(authJsonPath, JSON.stringify(authData, null, 2), "utf-8");
+    }
+  } catch {
+    // Non-critical background sync
+  }
+}
+
+/**
  * Get the opencode config file path.
  *
  * Prefers opencode.jsonc when present so we update the active config file
@@ -151,8 +207,19 @@ export async function updateOpencodeConfig(
       config.provider.google = {};
     }
 
-    // Replace google models with plugin models
-    config.provider.google.models = { ...OPENCODE_MODEL_DEFINITIONS };
+    const googleProvider = config.provider.google as Record<string, unknown>;
+    if (!googleProvider.npm) {
+      googleProvider.npm = "@ai-sdk/google";
+    }
+    if (!googleProvider.apiKey) {
+      googleProvider.apiKey = "opencode-antigravity-auth";
+    }
+    if (!googleProvider.options) {
+      googleProvider.options = { apiKey: "opencode-antigravity-auth" };
+    }
+    googleProvider.models = { ...OPENCODE_MODEL_DEFINITIONS };
+
+    syncOpencodeAuthJson();
 
     // Ensure config directory exists
     const configDir = dirname(configPath);

@@ -9,6 +9,15 @@ import {
   getAntigravityHeaders,
   type HeaderStyle,
 } from "./constants";
+export {
+  ANTIGRAVITY_DEFAULT_PROJECT_ID,
+  ANTIGRAVITY_ENDPOINT,
+  ANTIGRAVITY_ENDPOINT_FALLBACKS,
+  ANTIGRAVITY_ENDPOINT_PROD,
+  ANTIGRAVITY_PROVIDER_ID,
+  getAntigravityHeaders,
+  type HeaderStyle,
+} from "./constants";
 import { authorizeAntigravity, exchangeAntigravity } from "./antigravity/oauth";
 import type { AntigravityTokenExchangeResult } from "./antigravity/oauth";
 import { accessTokenExpired, isOAuthAuth, parseRefreshParts, formatRefreshParts } from "./plugin/auth";
@@ -65,6 +74,7 @@ import {
   isAgySdkSupportedRequest,
   isAntigravityOnlyGenerativeLanguageRequest,
   isApiKeyAuth,
+  isDummyApiKey,
   isRetryableAgySdkCredentialStatus,
   selectAgySdkCredential,
 } from "./plugin/api-key";
@@ -348,7 +358,8 @@ async function tryAgySdkFallbackForRequest(
   credentials: AgySdkCredential[],
   urlString: string,
 ): Promise<Response | null> {
-  if (!config.agy_sdk.api_key_fallback || credentials.length === 0 || !isAgySdkSupportedRequest(urlString)) {
+  const validCredentials = credentials.filter((c) => !isDummyApiKey(c.apiKey));
+  if (!config.agy_sdk.api_key_fallback || validCredentials.length === 0 || !isAgySdkSupportedRequest(urlString)) {
     return null;
   }
   // Defensive: if the original request body was already consumed (e.g. `input` is a
@@ -365,7 +376,7 @@ async function tryAgySdkFallbackForRequest(
   return tryFetchWithAgySdkCredentials(
     input,
     init,
-    credentials,
+    validCredentials,
     defaultRetryMsForConfig(config),
   );
 }
@@ -1336,7 +1347,7 @@ function createSoftQuotaBlockedResponse(input: {
 
 // Progressive rate limit retry delays
 const FIRST_RETRY_DELAY_MS = 1000;      // 1s - first 429 quick retry on same account
-const SWITCH_ACCOUNT_DELAY_MS = 5000;   // 5s - delay before switching to another account
+const SWITCH_ACCOUNT_DELAY_MS = 100;    // 100ms - fast rotation when switching to another account
 
 /**
  * Rate limit state tracking with time-window deduplication.
@@ -2004,7 +2015,13 @@ export const createAntigravityPlugin = (providerId: string) => async (
               );
               if (response) return response;
             }
-            return fetch(input, init);
+            const requestedModel = extractRequestedGeminiModel(urlString) || "gemini";
+            const family = getModelFamilyFromUrl(urlString);
+            return createSyntheticErrorResponse(
+              "No Antigravity accounts available and no valid Gemini API key configured. Run `opencode auth login` to authenticate.",
+              requestedModel,
+              family,
+            );
           }
 
 
@@ -2104,14 +2121,14 @@ export const createAntigravityPlugin = (providerId: string) => async (
             // (select -> refresh -> fetch/switch). If we blow far past that, the
             // routing is not converging (e.g. all accounts exhausted for an
             // Antigravity-only model) — give up gracefully instead of spinning.
-            if (++loopGuard > Math.max(50, accountCount * 8)) {
+            if (++loopGuard > Math.max(10, accountCount * 2)) {
               const guardFallback = await tryAgySdkFallbackForRequest(input, init, config, agySdkCredentials, urlString);
               if (guardFallback) return guardFallback;
-              throw lastError || new Error(
-                `Antigravity request routing did not converge for ${model ?? family}. ` +
-                `All ${accountCount} account(s) appear rate-limited or exhausted for this model. ` +
-                "Run `opencode auth login` to add accounts or wait for quota reset.",
-              );
+              const errorMessage =
+                `[Antigravity Error] Request routing did not converge for ${model ?? family}.\n` +
+                `All ${accountCount} account(s) appear rate-limited or exhausted on Google Antigravity.\n` +
+                "Run `opencode auth login` to add accounts or wait for quota reset.";
+              return createSyntheticErrorResponse(errorMessage, model ?? undefined, family);
             }
             const routingDecision = resolveHeaderRoutingDecision(urlString, family, config);
             const {
@@ -2213,10 +2230,10 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     debugLines,
                   );
                 }
-                throw lastError || new Error(
-                  `All ${accountCount} Antigravity account(s) are rate-limited for ${model ?? family}. ` +
-                  "Run `opencode auth login` to add accounts or wait for quota reset.",
-                );
+                const errorMessage =
+                  `[Antigravity Error] All ${accountCount} Antigravity account(s) are rate-limited for ${model ?? family}.\n` +
+                  "Run `opencode auth login` to add accounts or wait for quota reset.";
+              return createSyntheticErrorResponse(errorMessage, model || undefined, family);
               }
               if (accountManager.areAllAccountsOverSoftQuota(
                 family,
@@ -2779,7 +2796,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
                      if (family === "gemini" && allowQuotaFallback) {
                        const alternateStyle = accountManager.getAvailableHeaderStyle(account, family, model);
-                       const fallbackStyle = resolveQuotaFallbackHeaderStyle({ family, headerStyle, alternateStyle });
+                        const fallbackStyle = resolveQuotaFallbackHeaderStyle({ family, headerStyle, alternateStyle });
                        if (fallbackStyle) {
                          const safeModelName = model || "this model";
                          const currentQuotaName = headerStyle === "antigravity" ? "Antigravity" : "Gemini CLI";
@@ -3305,8 +3322,20 @@ export const createAntigravityPlugin = (providerId: string) => async (
             }
 
             // If we get here without returning, something went wrong
-            if (lastFailure) {
-              return transformAntigravityResponse(
+                if (lastFailure) {
+                  const failureStatus = lastFailure.response.status;
+                  if (failureStatus === 400 || failureStatus === 401) {
+                    const errorBodyText = await lastFailure.response.clone().text().catch(() => "");
+                    if (errorBodyText.includes("API_KEY_INVALID") || errorBodyText.includes("API key not valid")) {
+                      const requestedModel = model || extractRequestedGeminiModel(urlString) || "gemini";
+                      return createSyntheticErrorResponse(
+                        `All ${accountCount} Antigravity account(s) are rate-limited or exhausted for ${requestedModel}. Run \`opencode auth login\` to add accounts or wait for quota reset.`,
+                        requestedModel,
+                        family,
+                      );
+                    }
+                  }
+                  return transformAntigravityResponse(
                 lastFailure.response,
                 lastFailure.streaming,
                 lastFailure.debugContext,
@@ -4268,6 +4297,7 @@ function resolveHeaderRoutingDecision(
     explicitQuota,
     allowQuotaFallback:
       family === "gemini" &&
+      !explicitQuota &&
       resolvedModel?.isImageModel !== true &&
       !isGeminiPublicOnlyModel(modelWithSuffix ?? ""),
   };

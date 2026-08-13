@@ -1,6 +1,6 @@
 import { getKeepThinking } from "./config";
 import { createLogger } from "./logger";
-import { cacheSignature } from "./cache";
+import { cacheSignature } from "./cache.js";
 import {
   EMPTY_SCHEMA_PLACEHOLDER_NAME,
   EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION,

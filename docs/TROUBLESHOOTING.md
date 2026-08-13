@@ -21,6 +21,31 @@ OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
 
 ---
 
+### "Requested Entity Was Not Found" and False 429 RESOURCE_EXHAUSTED Errors
+
+**Symptoms:**
+- Error: `Requested entity was not found. Request preview access at https://goo.gle/enable-preview-features before using this model.`
+- OpenCode reports all accounts exhausted (HTTP 429 `RESOURCE_EXHAUSTED`) even when accounts have remaining quota.
+
+**Root Causes & Solutions:**
+
+1. **Endpoint Architecture (`daily-cloudcode-pa.sandbox.googleapis.com`)**:
+   Google Antigravity OAuth requests use `https://daily-cloudcode-pa.sandbox.googleapis.com` as the primary endpoint. Routing requests exclusively through production `cloudcode-pa.googleapis.com` causes Google to return 429 rate limit errors for individual accounts. Sandboxed daily routing preserves full quota functionality across all OAuth accounts.
+
+2. **Model Backend Resolution Suffixes**:
+   Google Cloud Code Assist API requires tier-suffix backend IDs for Gemini 3.6 and 3.7 Flash models (`gemini-3.6-flash-medium`, `gemini-3.6-flash-high`, `gemini-3.6-flash-low`). Passing raw `gemini-3.6-flash` causes Google API to return `404 NOT_FOUND` ("Requested entity was not found").
+
+3. **Rate Limit Classification & Account Rotation Speed**:
+   Messages containing `"Resource has been exhausted (e.g. check quota)."` must be classified as `QUOTA_EXHAUSTED` rather than `MODEL_CAPACITY_EXHAUSTED` to avoid multi-second backoff loops. `SWITCH_ACCOUNT_DELAY_MS` is set to 100ms for instant account rotation.
+
+4. **Synthetic / Hardcoded GCP Project IDs**:
+   Passing synthetic random project IDs (e.g. `alert-hill-p7c1c`) or hardcoding `infinite-provider-f7c1c` / `rising-fact-p41fc` in `antigravity-accounts.json` or `auth.json` causes Google to reject requests. Personal Antigravity OAuth accounts use project-less / account-level quota (`project: ""`).
+
+5. **Soft Quota Fallback**:
+   When all enabled accounts exceed the soft quota threshold (e.g. 80% usage), but still have remaining quota (`remainingFraction > 0`), the plugin falls back to the account with the highest remaining quota fraction instead of rejecting the request.
+
+---
+
 ## Quick Fixes
 
 ### Auth problems
@@ -402,10 +427,14 @@ DCP creates synthetic assistant messages that lack thinking blocks. **List this 
 
 ### oh-my-opencode
 
-Disable built-in auth:
+Disable built-in auth and override internal subagent models to use Antigravity OAuth models:
 ```json
 {
-  "google_auth": false
+  "google_auth": false,
+  "agents": {
+    "title": { "model": "google/antigravity-gemini-3.6-flash" },
+    "summary": { "model": "google/antigravity-gemini-3.6-flash" }
+  }
 }
 ```
 

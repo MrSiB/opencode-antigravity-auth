@@ -21,11 +21,15 @@ Antigravity is Google's **Unified Gateway API** for accessing multiple AI models
 
 ## Endpoints
 
-| Environment | URL | Status |
-|-------------|-----|--------|
-| **Daily (Sandbox)** | `https://daily-cloudcode-pa.sandbox.googleapis.com` | ✅ Active |
-| **Production** | `https://cloudcode-pa.googleapis.com` | ✅ Active |
-| **Autopush (Sandbox)** | `https://autopush-cloudcode-pa.sandbox.googleapis.com` | ❌ Unavailable |
+| Environment | URL | Status | Notes |
+|-------------|-----|--------|-------|
+| **Daily (Sandbox)** | `https://daily-cloudcode-pa.sandbox.googleapis.com` | ✅ Primary | Official primary endpoint for Antigravity OAuth accounts (same as Antigravity IDE / CLIProxy). |
+| **Autopush (Sandbox)** | `https://autopush-cloudcode-pa.sandbox.googleapis.com` | ⚠️ Secondary Fallback | Secondary fallback endpoint for Antigravity API requests. |
+| **Production** | `https://cloudcode-pa.googleapis.com` | ⚠️ Tertiary Fallback | Production endpoint used for project discovery (`loadCodeAssist`) and final fallback. |
+
+> [!NOTE]
+> **Endpoint Hierarchy:**
+> Antigravity OAuth requests use `https://daily-cloudcode-pa.sandbox.googleapis.com` as the primary endpoint. This matches the official Google Antigravity IDE and CLIProxy architecture, ensuring full quota availability for personal Google OAuth accounts without hitting 429 production limits.
 
 ### API Actions
 
@@ -80,6 +84,12 @@ Accept: text/event-stream
 |------------|----------|------|--------|
 | Claude Sonnet 4.6 | `claude-sonnet-4-6` | Anthropic | ✅ Verified |
 | Claude Opus 4.6 Thinking | `claude-opus-4-6-thinking` | Anthropic | ✅ Verified |
+| Gemini 3.7 Flash High | `gemini-3.7-flash-high` | Google | ✅ Verified |
+| Gemini 3.7 Flash Medium | `gemini-3.7-flash-medium` | Google | ✅ Verified |
+| Gemini 3.7 Flash Low | `gemini-3.7-flash-low` | Google | ✅ Verified |
+| Gemini 3.6 Flash High | `gemini-3.6-flash-high` | Google | ✅ Verified |
+| Gemini 3.6 Flash Medium | `gemini-3.6-flash-medium` | Google | ✅ Verified |
+| Gemini 3.6 Flash Low | `gemini-3.6-flash-low` | Google | ✅ Verified |
 | Gemini 3 Pro High | `gemini-3-pro-high` | Google | ✅ Verified |
 | Gemini 3 Pro Low | `gemini-3-pro-low` | Google | ✅ Verified |
 | GPT-OSS 120B Medium | `gpt-oss-120b-medium` | Other | ✅ Verified |

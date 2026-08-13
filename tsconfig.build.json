@@ -6,6 +6,7 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
+    "skipLibCheck": true,
     "allowImportingTsExtensions": false
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "index.ts"],
