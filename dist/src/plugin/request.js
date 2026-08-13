@@ -1654,6 +1654,9 @@ export async function transformAntigravityResponse(response, streaming, debugCon
     // while maintaining real-time streaming (no buffering of entire response).
     // This enables thinking tokens to be displayed as they arrive, like the Codex plugin.
     if (streaming && response.ok && isEventStreamResponse && response.body) {
+        if (!effectiveModel?.toLowerCase().includes("claude")) {
+            return response;
+        }
         const headers = new Headers(response.headers);
         logAntigravityDebugResponse(debugContext, response, {
             note: "Streaming SSE response (real-time transform)",
