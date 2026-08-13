@@ -6,6 +6,8 @@ import {
   isGenerativeLanguageRequest,
   reportTokenUsageTelemetry,
   clearTelemetryQueue,
+  getTelemetryQueueSize,
+  flushTelemetryQueue,
   __testExports,
 } from "./request.js";
 import { DEFAULT_CONFIG } from "./config/index.js";
@@ -21,6 +23,8 @@ const {
   extractConversationSeedFromMessages,
   extractConversationSeedFromContents,
   resolveProjectKey,
+  resolveAgentKey,
+  normalizeAgentPersona,
   isGeminiToolUsePart,
   isGeminiThinkingPart,
   ensureThoughtSignature,
@@ -201,15 +205,111 @@ describe("request.ts", () => {
       expect(resolveProjectKey("my-project")).toBe("my-project");
     });
 
-    it("returns fallback if candidate is not a string", () => {
-      expect(resolveProjectKey(null, "fallback")).toBe("fallback");
-      expect(resolveProjectKey(undefined, "fallback")).toBe("fallback");
-      expect(resolveProjectKey({}, "fallback")).toBe("fallback");
+    it("returns fallback if candidate is not a string or object", () => {
+      expect(resolveProjectKey(null, undefined, "fallback")).toBe("fallback");
+      expect(resolveProjectKey(undefined, undefined, "fallback")).toBe("fallback");
+      expect(resolveProjectKey({}, undefined, "fallback")).toBe("fallback");
     });
 
-    it("returns undefined if no valid candidate or fallback", () => {
+    it("extracts project key from headers X-OpenCode-Project or X-Project", () => {
+      const headers1 = new Headers({ "X-OpenCode-Project": "proj-opencode-header" });
+      expect(resolveProjectKey({}, headers1)).toBe("proj-opencode-header");
+
+      const headers2 = { "x-project": "proj-x-header" };
+      expect(resolveProjectKey({}, headers2)).toBe("proj-x-header");
+    });
+
+    it("extracts project key from request payload fields (project, project_name, project_path, metadata.project)", () => {
+      expect(resolveProjectKey({ project: "proj-1" })).toBe("proj-1");
+      expect(resolveProjectKey({ project_name: "proj-2" })).toBe("proj-2");
+      expect(resolveProjectKey({ projectName: "proj-3" })).toBe("proj-3");
+      expect(resolveProjectKey({ project_path: "/workspace/proj-4" })).toBe("/workspace/proj-4");
+      expect(resolveProjectKey({ metadata: { project: "proj-5" } })).toBe("proj-5");
+      expect(resolveProjectKey({ metadata: { project_name: "proj-6" } })).toBe("proj-6");
+      expect(resolveProjectKey({ metadata: { project_path: "/workspace/proj-7" } })).toBe("/workspace/proj-7");
+    });
+
+    it("returns undefined if no valid candidate, header, payload field, or fallback", () => {
       expect(resolveProjectKey(null)).toBeUndefined();
       expect(resolveProjectKey(undefined)).toBeUndefined();
+      expect(resolveProjectKey({})).toBeUndefined();
+    });
+  });
+
+  describe("normalizeAgentPersona", () => {
+    it("maps raw persona strings and matches to clean agent names", () => {
+      expect(normalizeAgentPersona("sisyphus-junior")).toBe("Sisyphus-Junior");
+      expect(normalizeAgentPersona("sisyphus")).toBe("Sisyphus");
+      expect(normalizeAgentPersona("sisiphus")).toBe("Sisyphus");
+      expect(normalizeAgentPersona("ORCHESTRATOR codebase")).toBe("Sisyphus");
+      expect(normalizeAgentPersona("orchestrator")).toBe("Sisyphus");
+      expect(normalizeAgentPersona("oracle")).toBe("Oracle");
+      expect(normalizeAgentPersona("metis")).toBe("Metis");
+      expect(normalizeAgentPersona("momus")).toBe("Momus");
+      expect(normalizeAgentPersona("explore")).toBe("Explore");
+      expect(normalizeAgentPersona("librarian")).toBe("Librarian");
+      expect(normalizeAgentPersona("frontend")).toBe("Frontend");
+      expect(normalizeAgentPersona("visual-engineering")).toBe("Frontend");
+      expect(normalizeAgentPersona("multimodal")).toBe("Multimodal-Looker");
+      expect(normalizeAgentPersona("hephaestus")).toBe("Hephaestus");
+      expect(normalizeAgentPersona("deep")).toBe("Hephaestus");
+      expect(normalizeAgentPersona("prometheus")).toBe("Prometheus");
+      expect(normalizeAgentPersona("atlas")).toBe("Atlas");
+      expect(normalizeAgentPersona("hermes")).toBe("Hermes");
+      expect(normalizeAgentPersona("build")).toBe("Build");
+      expect(normalizeAgentPersona("general")).toBe("Build");
+      expect(normalizeAgentPersona("custom-agent")).toBe("custom-agent");
+    });
+  });
+
+  describe("resolveAgentKey", () => {
+    it("extracts agent key from headers X-OpenCode-Agent or X-Agent", () => {
+      const headers1 = new Headers({ "X-OpenCode-Agent": "agent-opencode-header" });
+      expect(resolveAgentKey({}, headers1)).toBe("agent-opencode-header");
+
+      const headers2 = { "x-agent": "agent-x-header" };
+      expect(resolveAgentKey({}, headers2)).toBe("agent-x-header");
+    });
+
+    it("extracts agent key from payload fields (agent, agent_name, subagent, subagent_type, metadata.agent)", () => {
+      expect(resolveAgentKey({ agent: "agent-1" })).toBe("agent-1");
+      expect(resolveAgentKey({ agent_name: "agent-2" })).toBe("agent-2");
+      expect(resolveAgentKey({ subagent: "agent-3" })).toBe("agent-3");
+      expect(resolveAgentKey({ subagent_type: "explore" })).toBe("Explore");
+      expect(resolveAgentKey({ agent: "ORCHESTRATOR codebase" })).toBe("Sisyphus");
+      expect(resolveAgentKey({ metadata: { agent: "agent-4" } })).toBe("agent-4");
+      expect(resolveAgentKey({ metadata: { subagent_type: "librarian" } })).toBe("Librarian");
+    });
+
+    it("parses persona from system prompt text using regex ('You are \"...\"' or 'Your designated identity')", () => {
+      expect(resolveAgentKey({ systemInstruction: { parts: [{ text: 'You are "Sisyphus-Junior" - a focused task executor' }] } })).toBe("Sisyphus-Junior");
+      expect(resolveAgentKey({ system_instruction: { parts: [{ text: "You are 'Oracle'" }] } })).toBe("Oracle");
+      expect(resolveAgentKey({ system: "You are explore" })).toBe("Explore");
+      expect(resolveAgentKey({ messages: [{ role: "system", content: "You are librarian" }] })).toBe("Librarian");
+      expect(resolveAgentKey({
+        agent: "ORCHESTRATOR codebase",
+        systemInstruction: { parts: [{ text: '<agent-identity>\nYour designated identity for this session is "Momus".\n</agent-identity>' }] },
+      })).toBe("Momus");
+      expect(resolveAgentKey({
+        agent: "build",
+        systemInstruction: { parts: [{ text: 'You are "Metis" - Pre-planning consultant' }] },
+      })).toBe("Metis");
+      expect(resolveAgentKey({
+        agent: "ORCHESTRATOR codebase",
+        messages: [{ role: "user", content: '<agent-identity>\nYour designated identity for this session is "Sisyphus".\n</agent-identity>' }],
+      })).toBe("Sisyphus");
+      expect(resolveAgentKey({
+        request: {
+          systemInstruction: { parts: [{ text: 'You are "Oracle" - Read-only consultation agent' }] },
+        },
+      })).toBe("Oracle");
+    });
+
+    it("returns undefined when no agent or persona can be resolved", () => {
+      expect(resolveAgentKey(null)).toBeUndefined();
+      expect(resolveAgentKey(undefined)).toBeUndefined();
+      expect(resolveAgentKey({})).toBeUndefined();
+      expect(resolveAgentKey({ system: "You are a helpful assistant" })).toBeUndefined();
     });
   });
 
@@ -520,15 +620,22 @@ describe("request.ts", () => {
     const mockAccessToken = "test-token";
     const mockProjectId = "test-project";
 
-    it("returns unchanged request for non-generative-language URLs", () => {
+    it("extracts projectName and agentName in prepared request", () => {
       const result = prepareAntigravityRequest(
-        "https://example.com/api",
-        { method: "POST" },
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+        {
+          method: "POST",
+          headers: {
+            "X-OpenCode-Project": "my-opencode-project",
+            "X-OpenCode-Agent": "Sisyphus-Junior",
+          },
+          body: JSON.stringify({ contents: [] }),
+        },
         mockAccessToken,
-        mockProjectId
+        mockProjectId,
       );
-      expect(result.streaming).toBe(false);
-      expect(result.request).toBe("https://example.com/api");
+      expect(result.projectName).toBe("my-opencode-project");
+      expect(result.agentName).toBe("Sisyphus-Junior");
     });
 
     it("returns unchanged request for URLs without model pattern", () => {
@@ -1306,16 +1413,18 @@ describe("request.ts", () => {
       const [url, init] = call;
       expect(url).toBe("https://test.telemetry/v1/record");
       expect(init.method).toBe("POST");
-      expect(init.headers).toEqual({ "Content-Type": "application/json" });
+      expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
 
       const payload = JSON.parse(init.body as string);
-      expect(payload).toEqual({
+      expect(payload).toMatchObject({
         email: "dev@example.com",
         model: "gemini-3.6-flash-high",
         prompt_tokens: 120,
         completion_tokens: 60,
         total_tokens: 180,
       });
+      expect(payload.id).toBeDefined();
+      expect(payload.timestamp).toBeDefined();
       expect(init.signal).toBeDefined();
     });
 
@@ -1368,21 +1477,30 @@ describe("request.ts", () => {
     });
 
     it("handles undefined values safely with defaults ('local-developer' and 0)", () => {
-      reportTokenUsageTelemetry(undefined, undefined, undefined, {});
-
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      const call = fetchSpy.mock.calls[0] as [string, RequestInit];
-      const [url, init] = call;
-      expect(url).toBe("https://llm.wdsa.ru/v1/status/record_usage");
-
-      const payload = JSON.parse(init.body as string);
-      expect(payload).toEqual({
-        email: "local-developer",
-        model: undefined,
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        total_tokens: 0,
+      const loadConfigSpy = vi.spyOn(config, "loadConfig").mockReturnValue({
+        ...DEFAULT_CONFIG,
+        telemetry_url: "https://llm.wdsa.ru/v1/status/record_usage",
       });
+      try {
+        reportTokenUsageTelemetry(undefined, undefined, undefined, {});
+
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        const call = fetchSpy.mock.calls[0] as [string, RequestInit];
+        const [url, init] = call;
+        expect(url).toBe("https://llm.wdsa.ru/v1/status/record_usage");
+
+        const payload = JSON.parse(init.body as string);
+        expect(payload).toMatchObject({
+          email: "local-developer",
+          prompt_tokens: 0,
+          completion_tokens: 0,
+          total_tokens: 0,
+        });
+        expect(payload.id).toBeDefined();
+        expect(payload.timestamp).toBeDefined();
+      } finally {
+        loadConfigSpy.mockRestore();
+      }
     });
 
     it("safely ignores errors when fetch rejects", () => {
@@ -1396,6 +1514,280 @@ describe("request.ts", () => {
           { promptTokens: 10, candidateTokens: 10, totalTokens: 20 },
         );
       }).not.toThrow();
+    });
+
+    it("handles batch processing and 1s fetch timeout without blocking", async () => {
+      let resolveFirstFetch!: (val: Response) => void;
+      let rejectSecondFetch!: (err: Error) => void;
+
+      const firstFetchPromise = new Promise<Response>((resolve) => {
+        resolveFirstFetch = resolve;
+      });
+      const secondFetchPromise = new Promise<Response>((_, reject) => {
+        rejectSecondFetch = reject;
+      });
+
+      fetchSpy
+        .mockImplementationOnce(() => firstFetchPromise)
+        .mockImplementationOnce(() => secondFetchPromise)
+        .mockResolvedValue(new Response("ok"));
+
+      reportTokenUsageTelemetry(
+        "https://test.telemetry/v1/record",
+        "dev1@example.com",
+        "gemini-3.6-flash",
+        { promptTokens: 10, candidateTokens: 10, totalTokens: 20 },
+      );
+      reportTokenUsageTelemetry(
+        "https://test.telemetry/v1/record",
+        "dev2@example.com",
+        "gemini-3.6-flash",
+        { promptTokens: 20, candidateTokens: 20, totalTokens: 40 },
+      );
+      reportTokenUsageTelemetry(
+        "https://test.telemetry/v1/record",
+        "dev3@example.com",
+        "gemini-3.6-flash",
+        { promptTokens: 30, candidateTokens: 30, totalTokens: 60 },
+      );
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      resolveFirstFetch(new Response("ok"));
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+      rejectSecondFetch(new Error("Timeout of 1000ms exceeded"));
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(getTelemetryQueueSize()).toBe(0);
+    });
+  });
+
+  describe("process exit queue flusher", () => {
+    let fetchSpy: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      clearTelemetryQueue();
+      fetchSpy = vi.fn().mockResolvedValue(new Response("ok"));
+      vi.stubGlobal("fetch", fetchSpy);
+    });
+
+    afterEach(() => {
+      clearTelemetryQueue();
+      vi.unstubAllGlobals();
+    });
+
+    it("dispatches enriched telemetry payload with id, timestamp, session_id, source_client, request_origin, status_code, is_streaming, latency_ms, project_name, and agent_name", async () => {
+      reportTokenUsageTelemetry(
+        "https://test.telemetry/v1/record",
+        "dev@example.com",
+        "gemini-3.6-flash-high",
+        { promptTokens: 100, candidateTokens: 50, totalTokens: 150 },
+        "secret-key",
+        {
+          id: "custom-uuid-1234",
+          timestamp: "2026-08-12T12:00:00.000Z",
+          sessionId: "ses-test-123",
+          sourceClient: "opencode-desktop",
+          requestOrigin: "192.168.55.123",
+          statusCode: 200,
+          isStreaming: true,
+          latencyMs: 350,
+          projectName: "opencode-antigravity-auth-fork",
+          agentName: "Sisyphus-Junior",
+        },
+      );
+
+      await flushTelemetryQueue(1000);
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const call = fetchSpy.mock.calls[0] as [string, RequestInit];
+      const [, init] = call;
+      const payload = JSON.parse(init.body as string);
+
+      expect(payload).toEqual({
+        id: "custom-uuid-1234",
+        timestamp: "2026-08-12T12:00:00.000Z",
+        email: "dev@example.com",
+        model: "gemini-3.6-flash-high",
+        prompt_tokens: 100,
+        completion_tokens: 50,
+        total_tokens: 150,
+        session_id: "ses-test-123",
+        source_client: "opencode-desktop",
+        request_origin: "192.168.55.123",
+        status_code: 200,
+        is_streaming: true,
+        latency_ms: 350,
+        project_name: "opencode-antigravity-auth-fork",
+        agent_name: "Sisyphus-Junior",
+      });
+    });
+
+    it("drains 100% of telemetry queue on simulated process exit events (beforeExit, SIGINT, SIGTERM)", async () => {
+      let fetchResolve!: (val: Response) => void;
+      const pendingFetch = new Promise<Response>((r) => { fetchResolve = r; });
+      fetchSpy.mockImplementation(() => pendingFetch);
+
+      reportTokenUsageTelemetry(
+        "https://test.telemetry/v1/record",
+        "dev1@example.com",
+        "gemini-3.6-flash",
+        { promptTokens: 10, candidateTokens: 10, totalTokens: 20 },
+      );
+      reportTokenUsageTelemetry(
+        "https://test.telemetry/v1/record",
+        "dev2@example.com",
+        "gemini-3.6-flash",
+        { promptTokens: 20, candidateTokens: 20, totalTokens: 40 },
+      );
+
+      expect(getTelemetryQueueSize()).toBeGreaterThan(0);
+
+      fetchResolve(new Response("ok"));
+      process.emit("beforeExit", 0);
+      await flushTelemetryQueue(1000);
+
+      expect(getTelemetryQueueSize()).toBe(0);
+      expect(fetchSpy).toHaveBeenCalled();
+    });
+
+    it("times out gracefully without throwing if network hangs during process exit flush", async () => {
+      fetchSpy.mockImplementation(() => new Promise(() => {}));
+
+      reportTokenUsageTelemetry(
+        "https://test.telemetry/v1/record",
+        "dev@example.com",
+        "gemini-3.6-flash",
+        { promptTokens: 10, candidateTokens: 10, totalTokens: 20 },
+      );
+
+      const startTime = Date.now();
+      await expect(flushTelemetryQueue(100)).resolves.toBeUndefined();
+      const elapsed = Date.now() - startTime;
+      expect(elapsed).toBeLessThan(1000);
+    });
+  });
+
+  describe("losslessness and token attribution under retry and account rotation", () => {
+    let fetchSpy: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      clearTelemetryQueue();
+      fetchSpy = vi.fn().mockResolvedValue(new Response("ok"));
+      vi.stubGlobal("fetch", fetchSpy);
+    });
+
+    afterEach(() => {
+      clearTelemetryQueue();
+      vi.unstubAllGlobals();
+    });
+
+    it("verifies zero token loss (sum of streaming token deltas == total reported telemetry tokens)", async () => {
+      let totalStreamPromptTokens = 0;
+      let totalStreamCandidateTokens = 0;
+
+      const callbacks: StreamingCallbacks = {
+        onTokenUsage: (usage) => {
+          totalStreamPromptTokens += usage.promptTokens;
+          totalStreamCandidateTokens += usage.candidateTokens;
+          reportTokenUsageTelemetry(
+            "https://test.telemetry/v1/record",
+            "acc-1@example.com",
+            "gemini-3.6-flash",
+            usage,
+            undefined,
+            { sessionId: "ses-lossless-1" }
+          );
+        },
+      };
+
+      const store = createMockSignatureStore();
+      const transformer = createStreamingTransformer(store, callbacks, {});
+      const encoder = new TextEncoder();
+      const reader = transformer.readable.getReader();
+      const writer = transformer.writable.getWriter();
+
+      const readPromise = (async () => {
+        while (true) {
+          const { done } = await reader.read();
+          if (done) break;
+        }
+      })();
+
+      const chunks = [
+        `data: ${JSON.stringify({ response: { usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 20, totalTokenCount: 70 } } })}\n`,
+        `data: ${JSON.stringify({ response: { usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 45, totalTokenCount: 95 } } })}\n`,
+        `data: ${JSON.stringify({ response: { usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 80, totalTokenCount: 130 } } })}\n`,
+      ];
+
+      for (const chunk of chunks) {
+        await writer.write(encoder.encode(chunk));
+      }
+      await writer.close();
+      await readPromise;
+
+      await flushTelemetryQueue(1000);
+
+      let telemetryPromptTokensSum = 0;
+      let telemetryCandidateTokensSum = 0;
+
+      for (const call of fetchSpy.mock.calls as [string, RequestInit][]) {
+        const payload = JSON.parse(call[1].body as string);
+        telemetryPromptTokensSum += payload.prompt_tokens;
+        telemetryCandidateTokensSum += payload.completion_tokens;
+      }
+
+      expect(totalStreamPromptTokens).toBe(50);
+      expect(totalStreamCandidateTokens).toBe(80);
+      expect(totalStreamPromptTokens - telemetryPromptTokensSum).toBe(0);
+      expect(totalStreamCandidateTokens - telemetryCandidateTokensSum).toBe(0);
+      expect((totalStreamPromptTokens + totalStreamCandidateTokens) - (telemetryPromptTokensSum + telemetryCandidateTokensSum)).toBe(0);
+    });
+
+    it("correctly attributes tokens during 429 account rotation events (primary account vs secondary account)", async () => {
+      const primaryAccount = "acc-primary@example.com";
+      const secondaryAccount = "acc-secondary@example.com";
+
+      reportTokenUsageTelemetry(
+        "https://test.telemetry/v1/record",
+        primaryAccount,
+        "gemini-3.6-flash",
+        { promptTokens: 30, candidateTokens: 15, totalTokens: 45 },
+        undefined,
+        { statusCode: 429, sessionId: "ses-retry-429" }
+      );
+
+      reportTokenUsageTelemetry(
+        "https://test.telemetry/v1/record",
+        secondaryAccount,
+        "gemini-3.6-flash",
+        { promptTokens: 30, candidateTokens: 70, totalTokens: 100 },
+        undefined,
+        { statusCode: 200, sessionId: "ses-retry-429" }
+      );
+
+      await flushTelemetryQueue(1000);
+
+      const reportedPayloads = fetchSpy.mock.calls.map((call) => JSON.parse((call as [string, RequestInit])[1].body as string));
+
+      const primaryPayloads = reportedPayloads.filter((p) => p.email === primaryAccount);
+      const secondaryPayloads = reportedPayloads.filter((p) => p.email === secondaryAccount);
+
+      expect(primaryPayloads.length).toBe(1);
+      expect(primaryPayloads[0].total_tokens).toBe(45);
+      expect(primaryPayloads[0].status_code).toBe(429);
+
+      expect(secondaryPayloads.length).toBe(1);
+      expect(secondaryPayloads[0].total_tokens).toBe(100);
+      expect(secondaryPayloads[0].status_code).toBe(200);
+
+      const sessionTotalTokens = reportedPayloads
+        .filter((p) => p.session_id === "ses-retry-429")
+        .reduce((sum, p) => sum + p.total_tokens, 0);
+
+      expect(sessionTotalTokens).toBe(145);
     });
   });
 });

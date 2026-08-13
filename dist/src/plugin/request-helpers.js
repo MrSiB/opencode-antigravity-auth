@@ -1305,22 +1305,37 @@ export function parseAntigravityApiBody(rawText) {
 }
 /**
  * Extracts usageMetadata from a response object, guarding types.
+ * Supports both wrapped ({ response: { usageMetadata: ... } }) and unwrapped ({ usageMetadata: ... } / { usage: ... }) shapes.
  */
 export function extractUsageMetadata(body) {
-    const usage = (body.response && typeof body.response === "object"
-        ? body.response.usageMetadata
-        : undefined);
+    if (!body || typeof body !== "object") {
+        return null;
+    }
+    const rawObj = body;
+    const target = (rawObj.response && typeof rawObj.response === "object"
+        ? rawObj.response
+        : rawObj);
+    const usage = (target.usageMetadata || target.usage);
     if (!usage || typeof usage !== "object") {
         return null;
     }
-    const asRecord = usage;
     const toNumber = (value) => typeof value === "number" && Number.isFinite(value) ? value : undefined;
+    const prompt = toNumber(usage.promptTokenCount ?? usage.promptTokens ?? usage.prompt_tokens);
+    const candidates = toNumber(usage.candidatesTokenCount ?? usage.candidateTokens ?? usage.completionTokens ?? usage.completion_tokens);
+    const hasExplicitTotal = usage.totalTokenCount !== undefined || usage.totalTokens !== undefined || usage.total_tokens !== undefined;
+    const rawTotal = toNumber(usage.totalTokenCount ?? usage.totalTokens ?? usage.total_tokens);
+    const total = hasExplicitTotal
+        ? rawTotal
+        : ((prompt !== undefined || candidates !== undefined) ? (prompt ?? 0) + (candidates ?? 0) : undefined);
+    if (prompt === undefined && candidates === undefined && total === undefined) {
+        return null;
+    }
     return {
-        totalTokenCount: toNumber(asRecord.totalTokenCount),
-        promptTokenCount: toNumber(asRecord.promptTokenCount),
-        candidatesTokenCount: toNumber(asRecord.candidatesTokenCount),
-        cachedContentTokenCount: toNumber(asRecord.cachedContentTokenCount),
-        thoughtsTokenCount: toNumber(asRecord.thoughtsTokenCount),
+        totalTokenCount: total,
+        promptTokenCount: prompt,
+        candidatesTokenCount: candidates,
+        cachedContentTokenCount: toNumber(usage.cachedContentTokenCount),
+        thoughtsTokenCount: toNumber(usage.thoughtsTokenCount),
     };
 }
 /**
@@ -1339,7 +1354,7 @@ export function extractUsageFromSsePayload(payload) {
         try {
             const parsed = JSON.parse(jsonText);
             if (parsed && typeof parsed === "object") {
-                const usage = extractUsageMetadata({ response: parsed.response });
+                const usage = extractUsageMetadata(parsed);
                 if (usage) {
                     return usage;
                 }

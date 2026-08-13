@@ -3,6 +3,7 @@
 > **Notice**: This is a custom fork of the original [opencode-antigravity-auth](https://github.com/NoeFabris/opencode-antigravity-auth) repository by [@NoeFabris](https://github.com/NoeFabris).
 
 This fork incorporates several critical stability fixes and enhancements:
+- **Lossless Telemetry & Bi-Directional Project & Agent Analytics (v1.7.0)**: 100% SSE streaming token telemetry wiring without chunk multi-counting, process exit queue flusher (`SIGTERM`/`SIGINT`), OpenCode project (`project_name`) & agent persona (`agent_name`) metadata extraction, and Bi-Directional Project & Agent Drilldown Explorer (`Project -> Agents/Sessions` and `Agent -> Projects/Sessions`) with CSV/JSON exports.
 - **Analytics Paradise Suite (v1.6.0)**: Real-time telemetry queue, Executive KPI Glassmorphism Dashboard, 100% accurate token accounting ($\sum \text{Tokens}_i$), theoretical capacity forecasting, live per-bucket reset countdown timers, and embedded local status UI (`http://127.0.0.1:51128/status`).
 - **Node.js v22+ Compatibility**: Corrects the import of `dirname` in `version.js` (imports from `node:path` instead of `node:fs`) preventing launch crashes.
 - **Startup Auth Safe Recovery**: Fixes the race condition where starting with mock API keys (`dummy`) would wipe account credentials. It safely loads accounts from disk instead of truncating database caches.

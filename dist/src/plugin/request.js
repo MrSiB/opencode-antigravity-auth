@@ -45,6 +45,9 @@ function extractTextFromContent(content) {
     if (typeof content === "string") {
         return content;
     }
+    if (content && typeof content === "object" && Array.isArray(content.parts)) {
+        return extractTextFromContent(content.parts);
+    }
     if (!Array.isArray(content)) {
         return "";
     }
@@ -130,12 +133,300 @@ function resolveConversationKeyFromRequests(requestObjects) {
     }
     return undefined;
 }
-function resolveProjectKey(candidate, fallback) {
+function getHeaderValue(headers, key) {
+    if (!headers || typeof headers !== "object")
+        return undefined;
+    if (headers instanceof Headers || typeof headers.get === "function") {
+        const val = headers.get(key) || headers.get(key.toLowerCase());
+        if (typeof val === "string" && val.trim())
+            return val.trim();
+    }
+    const rec = headers;
+    const lowerKey = key.toLowerCase();
+    for (const k of Object.keys(rec)) {
+        if (k.toLowerCase() === lowerKey) {
+            const val = rec[k];
+            if (typeof val === "string" && val.trim())
+                return val.trim();
+        }
+    }
+    return undefined;
+}
+export function resolveProjectKey(candidate, headers, fallback) {
     if (typeof candidate === "string" && candidate.trim()) {
         return candidate.trim();
     }
+    const headerKeys = ["X-OpenCode-Project", "X-Project"];
+    for (const key of headerKeys) {
+        const val = getHeaderValue(headers, key) ?? getHeaderValue(candidate, key);
+        if (val)
+            return val;
+    }
+    if (candidate && typeof candidate === "object" && !(candidate instanceof Headers)) {
+        const payload = candidate;
+        const metadata = (payload.metadata && typeof payload.metadata === "object")
+            ? payload.metadata
+            : undefined;
+        const payloadCandidates = [
+            payload.project,
+            payload.project_name,
+            payload.projectName,
+            payload.project_path,
+            payload.projectPath,
+            metadata?.project,
+            metadata?.project_name,
+            metadata?.projectName,
+            metadata?.project_path,
+            metadata?.projectPath,
+        ];
+        for (const c of payloadCandidates) {
+            if (typeof c === "string" && c.trim()) {
+                return c.trim();
+            }
+        }
+    }
+    if (typeof headers === "string" && headers.trim()) {
+        return headers.trim();
+    }
     if (typeof fallback === "string" && fallback.trim()) {
         return fallback.trim();
+    }
+    return undefined;
+}
+function extractSystemPromptText(payload) {
+    const payloadTarget = (payload.request && typeof payload.request === "object")
+        ? payload.request
+        : payload;
+    const candidates = [
+        payloadTarget.systemInstruction,
+        payloadTarget.system_instruction,
+        payloadTarget.systemInstructionText,
+        payloadTarget.system,
+        payload.systemInstruction,
+        payload.system_instruction,
+        payload.systemInstructionText,
+        payload.system,
+    ];
+    for (const candidate of candidates) {
+        const extracted = extractTextFromContent(candidate);
+        if (extracted)
+            return extracted;
+    }
+    const messagesList = Array.isArray(payloadTarget.messages)
+        ? payloadTarget.messages
+        : Array.isArray(payload.messages)
+            ? payload.messages
+            : undefined;
+    if (messagesList) {
+        const systemMsg = messagesList.find((m) => m?.role === "system");
+        if (systemMsg) {
+            const extracted = extractTextFromContent(systemMsg.content);
+            if (extracted)
+                return extracted;
+        }
+        for (const msg of messagesList) {
+            if (msg && typeof msg === "object") {
+                const text = extractTextFromContent(msg.content);
+                if (text && (text.includes("<agent-identity>") || text.includes("designated identity") || text.includes("You are"))) {
+                    return text;
+                }
+            }
+        }
+    }
+    return "";
+}
+function parseAgentFromSystemPrompt(text) {
+    if (!text || typeof text !== "string")
+        return undefined;
+    const identityMatch = text.match(/(?:Your designated identity for this session is|designated identity)[^"'\n]*["']?([A-Za-z0-9_-]+)["']?/i);
+    if (identityMatch && identityMatch[1] && identityMatch[1].trim()) {
+        const candidate = identityMatch[1].trim();
+        const skip = new Set(["a", "an", "the", "session", "user"]);
+        if (candidate && !skip.has(candidate.toLowerCase())) {
+            return candidate;
+        }
+    }
+    const lower = text.toLowerCase();
+    if (lower.includes("sisyphus-junior") || lower.includes("sisyphus_junior"))
+        return "Sisyphus-Junior";
+    if (lower.includes("sisyphus") || lower.includes("sisiphus"))
+        return "Sisyphus";
+    if (lower.includes("oracle"))
+        return "Oracle";
+    if (lower.includes("metis"))
+        return "Metis";
+    if (lower.includes("momus"))
+        return "Momus";
+    if (lower.includes("explore"))
+        return "Explore";
+    if (lower.includes("librarian"))
+        return "Librarian";
+    if (lower.includes("frontend-ui-ux") || lower.includes("visual-engineering"))
+        return "Frontend";
+    if (lower.includes("hephaestus"))
+        return "Hephaestus";
+    if (lower.includes("multimodal-looker"))
+        return "Multimodal-Looker";
+    if (lower.includes("prometheus"))
+        return "Prometheus";
+    if (lower.includes("atlas"))
+        return "Atlas";
+    if (lower.includes("hermes"))
+        return "Hermes";
+    const quotedMatches = text.matchAll(/You are ["']([^"']+)["']/gi);
+    for (const match of quotedMatches) {
+        if (match && match[1] && match[1].trim()) {
+            const candidate = match[1].trim();
+            const skip = new Set(["a", "an", "the", "ready", "here", "acting", "going", "designed", "powered", "system", "antigravity", "ai coding assistant"]);
+            if (!skip.has(candidate.toLowerCase())) {
+                return candidate;
+            }
+        }
+    }
+    const unquotedMatch = text.match(/You are ([A-Za-z0-9_-]+)(?:\s+|-|\.|,|$)/i);
+    if (unquotedMatch && unquotedMatch[1]) {
+        const candidate = unquotedMatch[1].trim();
+        const skipWords = new Set(["a", "an", "the", "ready", "here", "acting", "going", "designed", "powered", "system", "antigravity"]);
+        if (candidate && !skipWords.has(candidate.toLowerCase())) {
+            return candidate;
+        }
+    }
+    return undefined;
+}
+export function normalizeAgentPersona(raw) {
+    if (!raw || typeof raw !== "string")
+        return raw;
+    const trimmed = raw.trim();
+    if (!trimmed)
+        return trimmed;
+    const lower = trimmed.toLowerCase();
+    if (lower.includes("sisyphus-junior") ||
+        lower.includes("sisyphus_junior") ||
+        lower.includes("sisyphus junior")) {
+        return "Sisyphus-Junior";
+    }
+    if (lower.includes("sisyphus") ||
+        lower.includes("sisiphus") ||
+        lower.includes("orchestrator") ||
+        lower.includes("orchestration")) {
+        return "Sisyphus";
+    }
+    if (lower.includes("oracle")) {
+        return "Oracle";
+    }
+    if (lower.includes("metis")) {
+        return "Metis";
+    }
+    if (lower.includes("momus")) {
+        return "Momus";
+    }
+    if (lower.includes("explore")) {
+        return "Explore";
+    }
+    if (lower.includes("librarian")) {
+        return "Librarian";
+    }
+    if (lower.includes("frontend") ||
+        lower.includes("visual-engineering") ||
+        lower.includes("visual_engineering") ||
+        lower.includes("visual engineering") ||
+        lower.includes("ui-ux") ||
+        lower.includes("ui_ux")) {
+        return "Frontend";
+    }
+    if (lower.includes("multimodal")) {
+        return "Multimodal-Looker";
+    }
+    if (lower.includes("hephaestus") ||
+        lower === "deep" ||
+        lower.startsWith("deep-") ||
+        lower.startsWith("deep_") ||
+        lower.startsWith("deep ")) {
+        return "Hephaestus";
+    }
+    if (lower.includes("prometheus")) {
+        return "Prometheus";
+    }
+    if (lower.includes("atlas")) {
+        return "Atlas";
+    }
+    if (lower.includes("hermes")) {
+        return "Hermes";
+    }
+    if (lower.includes("build") || lower.includes("general")) {
+        return "Build";
+    }
+    return trimmed;
+}
+export function resolveAgentKey(requestPayload, headers) {
+    const headerKeys = ["X-OpenCode-Agent", "X-Agent"];
+    for (const key of headerKeys) {
+        const val = getHeaderValue(headers, key) ?? getHeaderValue(requestPayload, key);
+        if (val)
+            return normalizeAgentPersona(val);
+    }
+    if (typeof requestPayload === "string" && requestPayload.trim()) {
+        const parsed = parseAgentFromSystemPrompt(requestPayload);
+        return parsed ? normalizeAgentPersona(parsed) : undefined;
+    }
+    if (requestPayload && typeof requestPayload === "object" && !(requestPayload instanceof Headers)) {
+        const payload = requestPayload;
+        const reqObj = (payload.request && typeof payload.request === "object")
+            ? payload.request
+            : payload;
+        const metadata = (payload.metadata && typeof payload.metadata === "object")
+            ? payload.metadata
+            : (reqObj.metadata && typeof reqObj.metadata === "object")
+                ? reqObj.metadata
+                : undefined;
+        const systemText = extractSystemPromptText(payload);
+        if (systemText) {
+            const parsed = parseAgentFromSystemPrompt(systemText);
+            if (parsed) {
+                const normalized = normalizeAgentPersona(parsed);
+                if (normalized)
+                    return normalized;
+            }
+        }
+        const subagentCandidates = [
+            payload.subagent,
+            payload.subagent_type,
+            payload.subagentType,
+            reqObj.subagent,
+            reqObj.subagent_type,
+            reqObj.subagentType,
+            metadata?.subagent,
+            metadata?.subagent_type,
+            metadata?.subagentType,
+        ];
+        for (const c of subagentCandidates) {
+            if (typeof c === "string" && c.trim()) {
+                const normalized = normalizeAgentPersona(c.trim());
+                if (normalized)
+                    return normalized;
+            }
+        }
+        const generalCandidates = [
+            payload.agent_name,
+            payload.agentName,
+            reqObj.agent_name,
+            reqObj.agentName,
+            metadata?.agent_name,
+            metadata?.agentName,
+            payload.agent,
+            reqObj.agent,
+            metadata?.agent,
+            payload.category,
+            reqObj.category,
+            metadata?.category,
+        ];
+        for (const c of generalCandidates) {
+            if (typeof c === "string" && c.trim()) {
+                const normalized = normalizeAgentPersona(c.trim());
+                if (normalized)
+                    return normalized;
+            }
+        }
     }
     return undefined;
 }
@@ -575,55 +866,152 @@ async function processTelemetryQueue() {
     if (isProcessingTelemetryQueue)
         return;
     isProcessingTelemetryQueue = true;
-    while (telemetryQueue.length > 0) {
-        const item = telemetryQueue.shift();
-        if (!item)
-            break;
-        const url = item.telemetryUrl || "https://llm.wdsa.ru/v1/status/record_usage";
-        const email = item.accountEmail || "local-developer";
-        const apiKey = item.telemetryApiKey ||
-            loadConfig()?.telemetry_api_key ||
-            process.env.TELEMETRY_API_KEY;
-        const headers = { "Content-Type": "application/json" };
-        if (apiKey) {
-            headers["Authorization"] = `Bearer ${apiKey}`;
-        }
-        try {
-            await fetch(url, {
-                method: "POST",
-                headers,
-                body: JSON.stringify({
+    try {
+        while (telemetryQueue.length > 0) {
+            const batch = telemetryQueue.splice(0, 10);
+            if (batch.length === 0)
+                break;
+            await Promise.allSettled(batch.map(async (item) => {
+                const url = item.telemetryUrl || loadConfig()?.telemetry_url || "https://llm.wdsa.ru/v1/status/record_usage";
+                const isMockedFetch = typeof fetch.mock === "object" && fetch.mock !== null;
+                if (process.env.VITEST && !isMockedFetch && url.includes("llm.wdsa.ru")) {
+                    return;
+                }
+                const email = item.accountEmail || "local-developer";
+                const apiKey = item.telemetryApiKey ||
+                    loadConfig()?.telemetry_api_key ||
+                    process.env.TELEMETRY_API_KEY ||
+                    process.env.INTERNAL_SERVICE_SECRET ||
+                    "dev_internal_secret_key_12345";
+                const headers = {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${apiKey}`,
+                };
+                const bodyPayload = {
+                    id: item.id || crypto.randomUUID(),
+                    timestamp: item.timestamp || new Date().toISOString(),
                     email,
                     model: item.model,
                     prompt_tokens: item.usage.promptTokens ?? 0,
                     completion_tokens: item.usage.candidateTokens ?? 0,
                     total_tokens: item.usage.totalTokens ?? 0,
-                }),
-                signal: AbortSignal.timeout(3000),
-            });
-        }
-        catch {
-            // Silence network / fetch errors so OpenCode model requests never hang or fail
+                };
+                if (item.sessionId !== undefined)
+                    bodyPayload.session_id = item.sessionId;
+                if (item.sourceClient !== undefined)
+                    bodyPayload.source_client = item.sourceClient;
+                if (item.requestOrigin !== undefined)
+                    bodyPayload.request_origin = item.requestOrigin;
+                if (item.statusCode !== undefined)
+                    bodyPayload.status_code = item.statusCode;
+                if (item.isStreaming !== undefined)
+                    bodyPayload.is_streaming = item.isStreaming;
+                if (item.latencyMs !== undefined)
+                    bodyPayload.latency_ms = item.latencyMs;
+                if (item.projectName !== undefined)
+                    bodyPayload.project_name = item.projectName;
+                if (item.agentName !== undefined)
+                    bodyPayload.agent_name = item.agentName;
+                try {
+                    const primaryRes = await fetch(url, {
+                        method: "POST",
+                        headers,
+                        body: JSON.stringify(bodyPayload),
+                        signal: AbortSignal.timeout(1500),
+                    }).catch(() => null);
+                    if (!primaryRes || !primaryRes.ok) {
+                        const fallbackUrl = "http://127.0.0.1:8009/v1/status/record_usage";
+                        if (url !== fallbackUrl) {
+                            await fetch(fallbackUrl, {
+                                method: "POST",
+                                headers,
+                                body: JSON.stringify(bodyPayload),
+                                signal: AbortSignal.timeout(1500),
+                            }).catch(() => null);
+                        }
+                    }
+                }
+                catch {
+                    // Silence network / fetch errors so OpenCode model requests never hang or fail
+                }
+            }));
         }
     }
-    isProcessingTelemetryQueue = false;
+    catch {
+    }
+    finally {
+        isProcessingTelemetryQueue = false;
+    }
 }
+export async function flushTelemetryQueue(timeoutMs = 2000) {
+    const timeoutPromise = new Promise((resolve) => {
+        setTimeout(resolve, timeoutMs);
+    });
+    const drainPromise = (async () => {
+        while (telemetryQueue.length > 0 || isProcessingTelemetryQueue) {
+            await processTelemetryQueue();
+            if (telemetryQueue.length === 0 && !isProcessingTelemetryQueue)
+                break;
+            await new Promise((r) => setTimeout(r, 10));
+        }
+    })();
+    await Promise.race([drainPromise, timeoutPromise]);
+}
+let exitFlusherRegistered = false;
+export function setupProcessExitFlusher() {
+    if (exitFlusherRegistered)
+        return;
+    exitFlusherRegistered = true;
+    const handleExit = async (signal) => {
+        try {
+            await flushTelemetryQueue(2000);
+        }
+        catch {
+        }
+        finally {
+            if (!process.env.VITEST && signal !== "beforeExit") {
+                process.exit(0);
+            }
+        }
+    };
+    process.on("beforeExit", () => { void handleExit("beforeExit"); });
+    process.on("SIGINT", () => { void handleExit("SIGINT"); });
+    process.on("SIGTERM", () => { void handleExit("SIGTERM"); });
+}
+setupProcessExitFlusher();
 /**
  * Sends non-blocking async token usage telemetry to the configured status endpoint.
  */
-export function reportTokenUsageTelemetry(telemetryUrl, accountEmail, model, usage, telemetryApiKey) {
-    if (!accountEmail || accountEmail === "local-developer" || accountEmail.includes("example.com")) {
-        return;
-    }
+export function reportTokenUsageTelemetry(telemetryUrl, accountEmail, model, usage, telemetryApiKey, metadata) {
     if (telemetryQueue.length >= MAX_TELEMETRY_QUEUE_SIZE) {
         telemetryQueue.shift();
     }
+    const id = metadata?.id || crypto.randomUUID();
+    const timestamp = metadata?.timestamp || new Date().toISOString();
+    const sessionId = metadata?.sessionId ?? metadata?.session_id;
+    const sourceClient = metadata?.sourceClient ?? metadata?.source_client;
+    const requestOrigin = metadata?.requestOrigin ?? metadata?.request_origin;
+    const statusCode = metadata?.statusCode ?? metadata?.status_code;
+    const isStreaming = metadata?.isStreaming ?? metadata?.is_streaming;
+    const latencyMs = metadata?.latencyMs ?? metadata?.latency_ms;
+    const projectName = metadata?.projectName ?? metadata?.project_name;
+    const agentName = metadata?.agentName ?? metadata?.agent_name;
     telemetryQueue.push({
         telemetryUrl,
-        accountEmail,
+        accountEmail: accountEmail || "local-developer",
         model,
         usage,
         telemetryApiKey,
+        id,
+        timestamp,
+        sessionId,
+        sourceClient,
+        requestOrigin,
+        statusCode,
+        isStreaming,
+        latencyMs,
+        projectName,
+        agentName,
     });
     void processTelemetryQueue();
 }
@@ -644,6 +1032,8 @@ export function prepareAntigravityRequest(input, init, accessToken, projectId, e
     const baseInit = { ...init };
     const headers = new Headers(init?.headers ?? {});
     let resolvedProjectId = projectId?.trim() || "";
+    let projectName = resolveProjectKey(undefined, init?.headers) || resolveProjectKey(projectId);
+    let agentName = resolveAgentKey(undefined, init?.headers);
     let toolDebugMissing = 0;
     const toolDebugSummaries = [];
     let toolDebugPayload;
@@ -656,6 +1046,8 @@ export function prepareAntigravityRequest(input, init, accessToken, projectId, e
             init: { ...baseInit, headers },
             streaming: false,
             headerStyle,
+            projectName,
+            agentName,
         };
     }
     headers.set("Authorization", `Bearer ${accessToken}`);
@@ -711,6 +1103,8 @@ export function prepareAntigravityRequest(input, init, accessToken, projectId, e
     if (bodyString) {
         try {
             const parsedBody = JSON.parse(bodyString);
+            projectName = resolveProjectKey(parsedBody, init?.headers) || resolveProjectKey(projectId);
+            agentName = resolveAgentKey(parsedBody, init?.headers);
             const isWrapped = typeof parsedBody === "object" && parsedBody !== null && "request" in parsedBody;
             if (isWrapped) {
                 const wrappedBody = {
@@ -1336,6 +1730,8 @@ export function prepareAntigravityRequest(input, init, accessToken, projectId, e
         needsSignedThinkingWarmup,
         headerStyle,
         thinkingRecoveryMessage,
+        projectName,
+        agentName,
     };
 }
 export function buildThinkingWarmupBody(bodyText, isClaudeThinking) {
@@ -1381,7 +1777,7 @@ export function buildThinkingWarmupBody(bodyText, isClaudeThinking) {
  * For streaming SSE responses, uses TransformStream for true real-time incremental streaming.
  * Thinking/reasoning tokens are transformed and forwarded immediately as they arrive.
  */
-export async function transformAntigravityResponse(response, streaming, debugContext, requestedModel, projectId, endpoint, effectiveModel, sessionId, toolDebugMissing, toolDebugSummary, toolDebugPayload, debugLines, account, accountManager) {
+export async function transformAntigravityResponse(response, streaming, debugContext, requestedModel, projectId, endpoint, effectiveModel, sessionId, toolDebugMissing, toolDebugSummary, toolDebugPayload, debugLines, account, accountManager, onTokenUsageCallback) {
     if ((response.ok || response.status === 200) && account && account.verificationRequired) {
         if (accountManager) {
             accountManager.clearAccountVerificationRequired(account, true);
@@ -1427,8 +1823,17 @@ export async function transformAntigravityResponse(response, streaming, debugCon
                 if (account && accountManager) {
                     accountManager.recordTokenUsage(account, modelFamily, usage.totalTokens);
                 }
-                const config = loadConfig();
-                reportTokenUsageTelemetry(config.telemetry_url, account?.email, effectiveModel || requestedModel, usage, config.telemetry_api_key);
+                if (onTokenUsageCallback) {
+                    onTokenUsageCallback(usage);
+                }
+                else {
+                    const config = loadConfig();
+                    reportTokenUsageTelemetry(config.telemetry_url, account?.email, effectiveModel || requestedModel, usage, config.telemetry_api_key, {
+                        sessionId,
+                        isStreaming: streaming,
+                        statusCode: response.status,
+                    });
+                }
             },
         }, {
             signatureSessionKey: sessionId,
@@ -1544,7 +1949,11 @@ export async function transformAntigravityResponse(response, streaming, debugCon
                 promptTokens: usage.promptTokenCount ?? 0,
                 candidateTokens: usage.candidatesTokenCount ?? 0,
                 totalTokens: usage.totalTokenCount ?? 0,
-            }, config.telemetry_api_key);
+            }, config.telemetry_api_key, {
+                sessionId,
+                isStreaming: streaming,
+                statusCode: response.status,
+            });
         }
         // Log cache stats when available
         if (usage && effectiveModel) {
@@ -1607,6 +2016,8 @@ export const __testExports = {
     extractConversationSeedFromContents,
     resolveConversationKey,
     resolveProjectKey,
+    resolveAgentKey,
+    normalizeAgentPersona,
     isGeminiToolUsePart,
     isGeminiThinkingPart,
     ensureThoughtSignature,

@@ -115,6 +115,7 @@ export declare function normalizeThinkingConfig(config: unknown): ThinkingConfig
 export declare function parseAntigravityApiBody(rawText: string): AntigravityApiBody | null;
 /**
  * Extracts usageMetadata from a response object, guarding types.
+ * Supports both wrapped ({ response: { usageMetadata: ... } }) and unwrapped ({ usageMetadata: ... } / { usage: ... }) shapes.
  */
 export declare function extractUsageMetadata(body: AntigravityApiBody): AntigravityUsageMetadata | null;
 /**

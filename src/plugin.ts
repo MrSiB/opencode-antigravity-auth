@@ -31,6 +31,7 @@ import {
   buildThinkingWarmupBody,
   isGenerativeLanguageRequest,
   prepareAntigravityRequest,
+  reportTokenUsageTelemetry,
   transformAntigravityResponse,
 } from "./plugin/request.js";
 import { resolveModelWithTier } from "./plugin/transform/model-resolver.js";
@@ -1644,7 +1645,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
           const latestAuth = await getAuth();
           if (!isOAuthAuth(latestAuth) && accountManager.getAccountCount() === 0) {
-            return fetch(input, init);
+            return nativeFetch(input, init);
           }
 
           if (accountManager.getAccountCount() === 0) {
@@ -2040,7 +2041,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
               try {
                 pushDebug("thinking-warmup: start");
-                const warmupResponse = await fetch(warmupUrl, warmupInit);
+                const warmupResponse = await nativeFetch(warmupUrl, warmupInit);
                 const transformed = await transformAntigravityResponse(
                   warmupResponse,
                   true,
@@ -2217,13 +2218,13 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
                 let response: Response;
                 try {
-                  response = await fetch(prepared.request, prepared.init);
+                  response = await nativeFetch(prepared.request, prepared.init);
                 } catch (fetchErr) {
                   pushDebug(`fetch-error=${String(fetchErr)} cause=${String((fetchErr as any)?.cause ?? "")}`);
                   log.warn("Outgoing fetch failed, retrying...", { error: String(fetchErr), cause: String((fetchErr as any)?.cause ?? "") });
                   await sleep(500, abortSignal);
                   try {
-                    response = await fetch(prepared.request, prepared.init);
+                    response = await nativeFetch(prepared.request, prepared.init);
                   } catch (secondErr) {
                     if (tokenConsumed) {
                       getTokenTracker().refund(account.index);
@@ -2590,6 +2591,24 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   prepared.toolDebugSummary,
                   prepared.toolDebugPayload,
                   debugLines,
+                  account,
+                  accountManager,
+                  (usage) => {
+                    reportTokenUsageTelemetry(
+                      config.telemetry_url,
+                      account?.email,
+                      prepared.effectiveModel || prepared.requestedModel,
+                      usage,
+                      config.telemetry_api_key,
+                      {
+                        sessionId: prepared.sessionId,
+                        isStreaming: prepared.streaming,
+                        statusCode: response.status,
+                        projectName: prepared.projectName,
+                        agentName: prepared.agentName,
+                      },
+                    );
+                  },
                 );
 
                 // Check for context errors and show appropriate toast

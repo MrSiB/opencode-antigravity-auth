@@ -190,19 +190,24 @@ export function transformSseLine(
   }
 
   try {
-    const parsed = JSON.parse(json) as { response?: unknown };
-    if (parsed.response !== undefined) {
-      const respObj = parsed.response as Record<string, unknown>;
-      if (respObj && typeof respObj === "object" && respObj.usageMetadata) {
-        const usage = respObj.usageMetadata as Record<string, unknown>;
-        const promptTokens = Number(usage.promptTokenCount || usage.promptTokens || 0);
-        const candidateTokens = Number(usage.candidatesTokenCount || usage.candidateTokens || usage.completionTokens || 0);
-        const totalTokens = Number(usage.totalTokenCount || usage.totalTokens || (promptTokens + candidateTokens));
+    const parsed = JSON.parse(json) as Record<string, unknown>;
+    const targetObj = (parsed.response && typeof parsed.response === 'object')
+      ? (parsed.response as Record<string, unknown>)
+      : parsed;
+
+    if (targetObj && typeof targetObj === 'object') {
+      const usage = (targetObj.usageMetadata || targetObj.usage) as Record<string, unknown> | undefined;
+      if (usage && typeof usage === 'object') {
+        const promptTokens = Number(usage.promptTokenCount || usage.promptTokens || usage.prompt_tokens || 0);
+        const candidateTokens = Number(usage.candidatesTokenCount || usage.candidateTokens || usage.completionTokens || usage.completion_tokens || 0);
+        const totalTokens = Number(usage.totalTokenCount || usage.totalTokens || usage.total_tokens || (promptTokens + candidateTokens));
         if (totalTokens > 0 || promptTokens > 0) {
           callbacks.onTokenUsage?.({ promptTokens, candidateTokens, totalTokens });
         }
       }
+    }
 
+    if (parsed.response !== undefined) {
       if (options.cacheSignatures && options.signatureSessionKey) {
         cacheThinkingSignaturesFromResponse(
           parsed.response,
@@ -223,7 +228,6 @@ export function transformSseLine(
         response = callbacks.onInjectDebug(response, options.debugText);
         debugState.injected = true;
       }
-      // Note: onInjectSyntheticThinking removed - keep_thinking now uses debugText path
 
       const transformed = callbacks.transformThinkingParts
         ? callbacks.transformThinkingParts(response)
@@ -312,6 +316,33 @@ export function createStreamingTransformer(
   const debugState = { injected: false };
   let hasSeenUsageMetadata = false;
 
+  let lastPromptTokens = 0;
+  let lastCandidatesTokens = 0;
+
+  const handleTokenUsageDelta = (usage: { promptTokens: number; candidateTokens: number; totalTokens: number }) => {
+    const currentPrompt = Math.max(0, usage.promptTokens || 0);
+    const currentCandidates = Math.max(0, usage.candidateTokens || 0);
+
+    const deltaPrompt = Math.max(0, currentPrompt - lastPromptTokens);
+    const deltaCandidates = Math.max(0, currentCandidates - lastCandidatesTokens);
+
+    if (deltaPrompt > 0 || deltaCandidates > 0) {
+      lastPromptTokens = Math.max(lastPromptTokens, currentPrompt);
+      lastCandidatesTokens = Math.max(lastCandidatesTokens, currentCandidates);
+
+      callbacks.onTokenUsage?.({
+        promptTokens: deltaPrompt,
+        candidateTokens: deltaCandidates,
+        totalTokens: deltaPrompt + deltaCandidates,
+      });
+    }
+  };
+
+  const internalCallbacks: StreamingCallbacks = {
+    ...callbacks,
+    onTokenUsage: handleTokenUsageDelta,
+  };
+
   return new TransformStream({
     transform(chunk, controller) {
       buffer += decoder.decode(chunk, { stream: true });
@@ -330,7 +361,7 @@ export function createStreamingTransformer(
           signatureStore,
           thoughtBuffer,
           sentThinkingBuffer,
-          callbacks,
+          internalCallbacks,
           options,
           debugState,
         );
@@ -349,7 +380,7 @@ export function createStreamingTransformer(
           signatureStore,
           thoughtBuffer,
           sentThinkingBuffer,
-          callbacks,
+          internalCallbacks,
           options,
           debugState,
         );

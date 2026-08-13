@@ -11,7 +11,9 @@ declare function extractTextFromContent(content: unknown): string;
 declare function extractConversationSeedFromMessages(messages: any[]): string;
 declare function extractConversationSeedFromContents(contents: any[]): string;
 declare function resolveConversationKey(requestPayload: Record<string, unknown>): string | undefined;
-declare function resolveProjectKey(candidate?: unknown, fallback?: string): string | undefined;
+export declare function resolveProjectKey(candidate?: unknown, headers?: unknown, fallback?: string): string | undefined;
+export declare function normalizeAgentPersona(raw: string): string;
+export declare function resolveAgentKey(requestPayload?: unknown, headers?: unknown): string | undefined;
 declare function isGeminiToolUsePart(part: any): boolean;
 declare function isGeminiThinkingPart(part: any): boolean;
 declare function ensureThoughtSignature(part: any, sessionId: string): any;
@@ -36,6 +38,26 @@ export declare function isModelUnavailableError(status: number, message?: string
  * Maps HTTP 404 / NOT_FOUND / "Requested entity was not found" to "MODEL_UNAVAILABLE".
  */
 export declare function classifyApiError(status: number, message?: string, bodyText?: string): string;
+export interface TelemetryMetadata {
+    id?: string | undefined;
+    timestamp?: string | undefined;
+    sessionId?: string | undefined;
+    session_id?: string | undefined;
+    sourceClient?: string | undefined;
+    source_client?: string | undefined;
+    requestOrigin?: string | undefined;
+    request_origin?: string | undefined;
+    statusCode?: number | undefined;
+    status_code?: number | undefined;
+    isStreaming?: boolean | undefined;
+    is_streaming?: boolean | undefined;
+    latencyMs?: number | undefined;
+    latency_ms?: number | undefined;
+    projectName?: string | undefined;
+    project_name?: string | undefined;
+    agentName?: string | undefined;
+    agent_name?: string | undefined;
+}
 export interface TelemetryQueueItem {
     telemetryUrl: string | undefined;
     accountEmail: string | undefined;
@@ -46,9 +68,21 @@ export interface TelemetryQueueItem {
         totalTokens?: number;
     };
     telemetryApiKey?: string | undefined;
+    id?: string | undefined;
+    timestamp?: string | undefined;
+    sessionId?: string | undefined;
+    sourceClient?: string | undefined;
+    requestOrigin?: string | undefined;
+    statusCode?: number | undefined;
+    isStreaming?: boolean | undefined;
+    latencyMs?: number | undefined;
+    projectName?: string | undefined;
+    agentName?: string | undefined;
 }
 export declare function getTelemetryQueueSize(): number;
 export declare function clearTelemetryQueue(): void;
+export declare function flushTelemetryQueue(timeoutMs?: number): Promise<void>;
+export declare function setupProcessExitFlusher(): void;
 /**
  * Sends non-blocking async token usage telemetry to the configured status endpoint.
  */
@@ -56,7 +90,7 @@ export declare function reportTokenUsageTelemetry(telemetryUrl: string | undefin
     promptTokens?: number;
     candidateTokens?: number;
     totalTokens?: number;
-}, telemetryApiKey?: string | undefined): void;
+}, telemetryApiKey?: string | undefined, metadata?: TelemetryMetadata): void;
 /**
  * Detects requests headed to the Google Generative Language API so we can intercept them.
  */
@@ -89,6 +123,8 @@ export declare function prepareAntigravityRequest(input: RequestInfo, init: Requ
     needsSignedThinkingWarmup?: boolean;
     headerStyle: HeaderStyle;
     thinkingRecoveryMessage?: string;
+    projectName?: string;
+    agentName?: string;
 };
 export declare function buildThinkingWarmupBody(bodyText: string | undefined, isClaudeThinking: boolean): string | null;
 /**
@@ -98,7 +134,11 @@ export declare function buildThinkingWarmupBody(bodyText: string | undefined, is
  * For streaming SSE responses, uses TransformStream for true real-time incremental streaming.
  * Thinking/reasoning tokens are transformed and forwarded immediately as they arrive.
  */
-export declare function transformAntigravityResponse(response: Response, streaming: boolean, debugContext?: AntigravityDebugContext | null, requestedModel?: string, projectId?: string, endpoint?: string, effectiveModel?: string, sessionId?: string, toolDebugMissing?: number, toolDebugSummary?: string, toolDebugPayload?: string, debugLines?: string[], account?: ManagedAccount, accountManager?: AccountManager): Promise<Response>;
+export declare function transformAntigravityResponse(response: Response, streaming: boolean, debugContext?: AntigravityDebugContext | null, requestedModel?: string, projectId?: string, endpoint?: string, effectiveModel?: string, sessionId?: string, toolDebugMissing?: number, toolDebugSummary?: string, toolDebugPayload?: string, debugLines?: string[], account?: ManagedAccount, accountManager?: AccountManager, onTokenUsageCallback?: (usage: {
+    promptTokens: number;
+    candidateTokens: number;
+    totalTokens: number;
+}) => void): Promise<Response>;
 export declare const __testExports: {
     buildSignatureSessionKey: typeof buildSignatureSessionKey;
     hashConversationSeed: typeof hashConversationSeed;
@@ -107,6 +147,8 @@ export declare const __testExports: {
     extractConversationSeedFromContents: typeof extractConversationSeedFromContents;
     resolveConversationKey: typeof resolveConversationKey;
     resolveProjectKey: typeof resolveProjectKey;
+    resolveAgentKey: typeof resolveAgentKey;
+    normalizeAgentPersona: typeof normalizeAgentPersona;
     isGeminiToolUsePart: typeof isGeminiToolUsePart;
     isGeminiThinkingPart: typeof isGeminiThinkingPart;
     ensureThoughtSignature: typeof ensureThoughtSignature;
