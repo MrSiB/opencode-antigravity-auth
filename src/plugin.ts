@@ -1,3 +1,4 @@
+process.env.OPENCODE_ANTIGRAVITY_CONSOLE_LOG = '1';
 import { exec } from "node:child_process";
 import { createServer as createHttpServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Readable } from "node:stream";
@@ -1643,8 +1644,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
           return nativeFetch(input, init);
         }
 
-          const latestAuth = await getAuth();
-          if (!isOAuthAuth(latestAuth) && accountManager.getAccountCount() === 0) {
+          if (accountManager.getAccountCount() === 0) {
             return nativeFetch(input, init);
           }
 
@@ -2041,8 +2041,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
               try {
                 pushDebug("thinking-warmup: start");
-                const warmupResponse = await nativeFetch(warmupUrl, warmupInit);
-                const transformed = await transformAntigravityResponse(
+                console.error("[DEBUG] warmup fetch..."); const warmupResponse = await nativeFetch(warmupUrl, warmupInit);
+                console.error("[DEBUG] calling transform..."); const transformed = await transformAntigravityResponse(
                   warmupResponse,
                   true,
                   warmupDebugContext,
@@ -2218,13 +2218,23 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
                 let response: Response;
                 try {
-                  response = await nativeFetch(prepared.request, prepared.init);
+                  console.error("[DEBUG] calling nativeFetch... url=", prepared.request); response = await nativeFetch(prepared.request, prepared.init);
+          if (response.status >= 400) {
+            const clone = response.clone();
+            const text = await clone.text();
+            console.error("[ANTIGRAVITY RESPONSE FROM CLOUDCODE-PA]:", response.status, text);
+          } console.error("[DEBUG] nativeFetch returned! status=", response.status);
                 } catch (fetchErr) {
                   pushDebug(`fetch-error=${String(fetchErr)} cause=${String((fetchErr as any)?.cause ?? "")}`);
                   log.warn("Outgoing fetch failed, retrying...", { error: String(fetchErr), cause: String((fetchErr as any)?.cause ?? "") });
                   await sleep(500, abortSignal);
                   try {
-                    response = await nativeFetch(prepared.request, prepared.init);
+                    console.error("[DEBUG] calling nativeFetch... url=", prepared.request); response = await nativeFetch(prepared.request, prepared.init);
+          if (response.status >= 400) {
+            const clone = response.clone();
+            const text = await clone.text();
+            console.error("[ANTIGRAVITY RESPONSE FROM CLOUDCODE-PA]:", response.status, text);
+          } console.error("[DEBUG] nativeFetch returned! status=", response.status);
                   } catch (secondErr) {
                     if (tokenConsumed) {
                       getTokenTracker().refund(account.index);

@@ -1711,6 +1711,7 @@ export function prepareAntigravityRequest(input, init, accessToken, projectId, e
         headers.set("X-Goog-Api-Client", GEMINI_CLI_HEADERS["X-Goog-Api-Client"]);
         headers.set("Client-Metadata", GEMINI_CLI_HEADERS["Client-Metadata"]);
     }
+    console.error("[ANTIGRAVITY REQUEST TO CLOUDCODE-PA]:", JSON.stringify(body).slice(0, 5000));
     return {
         request: transformedUrl,
         init: {
