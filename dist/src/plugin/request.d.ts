@@ -12,7 +12,6 @@ declare function extractConversationSeedFromMessages(messages: any[]): string;
 declare function extractConversationSeedFromContents(contents: any[]): string;
 declare function resolveConversationKey(requestPayload: Record<string, unknown>): string | undefined;
 export declare function resolveProjectKey(candidate?: unknown, headers?: unknown, fallback?: string): string | undefined;
-export declare function normalizeAgentPersona(raw: string): string;
 export declare function resolveAgentKey(requestPayload?: unknown, headers?: unknown): string | undefined;
 declare function isGeminiToolUsePart(part: any): boolean;
 declare function isGeminiThinkingPart(part: any): boolean;
@@ -148,7 +147,6 @@ export declare const __testExports: {
     resolveConversationKey: typeof resolveConversationKey;
     resolveProjectKey: typeof resolveProjectKey;
     resolveAgentKey: typeof resolveAgentKey;
-    normalizeAgentPersona: typeof normalizeAgentPersona;
     isGeminiToolUsePart: typeof isGeminiToolUsePart;
     isGeminiThinkingPart: typeof isGeminiThinkingPart;
     ensureThoughtSignature: typeof ensureThoughtSignature;

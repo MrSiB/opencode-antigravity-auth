@@ -24,7 +24,6 @@ const {
   extractConversationSeedFromContents,
   resolveProjectKey,
   resolveAgentKey,
-  normalizeAgentPersona,
   isGeminiToolUsePart,
   isGeminiThinkingPart,
   ensureThoughtSignature,
@@ -236,32 +235,6 @@ describe("request.ts", () => {
     });
   });
 
-  describe("normalizeAgentPersona", () => {
-    it("maps raw persona strings and matches to clean agent names", () => {
-      expect(normalizeAgentPersona("sisyphus-junior")).toBe("Sisyphus-Junior");
-      expect(normalizeAgentPersona("sisyphus")).toBe("Sisyphus");
-      expect(normalizeAgentPersona("sisiphus")).toBe("Sisyphus");
-      expect(normalizeAgentPersona("ORCHESTRATOR codebase")).toBe("Sisyphus");
-      expect(normalizeAgentPersona("orchestrator")).toBe("Sisyphus");
-      expect(normalizeAgentPersona("oracle")).toBe("Oracle");
-      expect(normalizeAgentPersona("metis")).toBe("Metis");
-      expect(normalizeAgentPersona("momus")).toBe("Momus");
-      expect(normalizeAgentPersona("explore")).toBe("Explore");
-      expect(normalizeAgentPersona("librarian")).toBe("Librarian");
-      expect(normalizeAgentPersona("frontend")).toBe("Frontend");
-      expect(normalizeAgentPersona("visual-engineering")).toBe("Frontend");
-      expect(normalizeAgentPersona("multimodal")).toBe("Multimodal-Looker");
-      expect(normalizeAgentPersona("hephaestus")).toBe("Hephaestus");
-      expect(normalizeAgentPersona("deep")).toBe("Hephaestus");
-      expect(normalizeAgentPersona("prometheus")).toBe("Prometheus");
-      expect(normalizeAgentPersona("atlas")).toBe("Atlas");
-      expect(normalizeAgentPersona("hermes")).toBe("Hermes");
-      expect(normalizeAgentPersona("build")).toBe("Build");
-      expect(normalizeAgentPersona("general")).toBe("Build");
-      expect(normalizeAgentPersona("custom-agent")).toBe("custom-agent");
-    });
-  });
-
   describe("resolveAgentKey", () => {
     it("extracts agent key from headers X-OpenCode-Agent or X-Agent", () => {
       const headers1 = new Headers({ "X-OpenCode-Agent": "agent-opencode-header" });
@@ -275,34 +248,16 @@ describe("request.ts", () => {
       expect(resolveAgentKey({ agent: "agent-1" })).toBe("agent-1");
       expect(resolveAgentKey({ agent_name: "agent-2" })).toBe("agent-2");
       expect(resolveAgentKey({ subagent: "agent-3" })).toBe("agent-3");
-      expect(resolveAgentKey({ subagent_type: "explore" })).toBe("Explore");
-      expect(resolveAgentKey({ agent: "ORCHESTRATOR codebase" })).toBe("Sisyphus");
+      expect(resolveAgentKey({ subagent_type: "explore" })).toBe("explore");
       expect(resolveAgentKey({ metadata: { agent: "agent-4" } })).toBe("agent-4");
-      expect(resolveAgentKey({ metadata: { subagent_type: "librarian" } })).toBe("Librarian");
+      expect(resolveAgentKey({ metadata: { subagent_type: "librarian" } })).toBe("librarian");
     });
 
-    it("parses persona from system prompt text using regex ('You are \"...\"' or 'Your designated identity')", () => {
+    it("parses persona from system prompt text using regex ('You are \"...\"' or 'You are ...')", () => {
       expect(resolveAgentKey({ systemInstruction: { parts: [{ text: 'You are "Sisyphus-Junior" - a focused task executor' }] } })).toBe("Sisyphus-Junior");
       expect(resolveAgentKey({ system_instruction: { parts: [{ text: "You are 'Oracle'" }] } })).toBe("Oracle");
-      expect(resolveAgentKey({ system: "You are explore" })).toBe("Explore");
-      expect(resolveAgentKey({ messages: [{ role: "system", content: "You are librarian" }] })).toBe("Librarian");
-      expect(resolveAgentKey({
-        agent: "ORCHESTRATOR codebase",
-        systemInstruction: { parts: [{ text: '<agent-identity>\nYour designated identity for this session is "Momus".\n</agent-identity>' }] },
-      })).toBe("Momus");
-      expect(resolveAgentKey({
-        agent: "build",
-        systemInstruction: { parts: [{ text: 'You are "Metis" - Pre-planning consultant' }] },
-      })).toBe("Metis");
-      expect(resolveAgentKey({
-        agent: "ORCHESTRATOR codebase",
-        messages: [{ role: "user", content: '<agent-identity>\nYour designated identity for this session is "Sisyphus".\n</agent-identity>' }],
-      })).toBe("Sisyphus");
-      expect(resolveAgentKey({
-        request: {
-          systemInstruction: { parts: [{ text: 'You are "Oracle" - Read-only consultation agent' }] },
-        },
-      })).toBe("Oracle");
+      expect(resolveAgentKey({ system: "You are explore" })).toBe("explore");
+      expect(resolveAgentKey({ messages: [{ role: "system", content: "You are librarian" }] })).toBe("librarian");
     });
 
     it("returns undefined when no agent or persona can be resolved", () => {

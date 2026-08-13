@@ -294,15 +294,7 @@ export function resolveProjectKey(
 }
 
 function extractSystemPromptText(payload: Record<string, unknown>): string {
-  const payloadTarget = (payload.request && typeof payload.request === "object")
-    ? (payload.request as Record<string, unknown>)
-    : payload;
-
   const candidates = [
-    payloadTarget.systemInstruction,
-    payloadTarget.system_instruction,
-    payloadTarget.systemInstructionText,
-    payloadTarget.system,
     payload.systemInstruction,
     payload.system_instruction,
     payload.systemInstructionText,
@@ -314,26 +306,11 @@ function extractSystemPromptText(payload: Record<string, unknown>): string {
     if (extracted) return extracted;
   }
 
-  const messagesList = Array.isArray(payloadTarget.messages)
-    ? payloadTarget.messages
-    : Array.isArray(payload.messages)
-    ? payload.messages
-    : undefined;
-
-  if (messagesList) {
-    const systemMsg = messagesList.find((m: any) => m?.role === "system");
+  if (Array.isArray(payload.messages)) {
+    const systemMsg = payload.messages.find((m: any) => m?.role === "system");
     if (systemMsg) {
       const extracted = extractTextFromContent(systemMsg.content);
       if (extracted) return extracted;
-    }
-
-    for (const msg of messagesList) {
-      if (msg && typeof msg === "object") {
-        const text = extractTextFromContent((msg as any).content);
-        if (text && (text.includes("<agent-identity>") || text.includes("designated identity") || text.includes("You are"))) {
-          return text;
-        }
-      }
     }
   }
 
@@ -343,139 +320,21 @@ function extractSystemPromptText(payload: Record<string, unknown>): string {
 function parseAgentFromSystemPrompt(text: string): string | undefined {
   if (!text || typeof text !== "string") return undefined;
 
-  const identityMatch = text.match(/(?:Your designated identity for this session is|designated identity)[^"'\n]*["']?([A-Za-z0-9_-]+)["']?/i);
-  if (identityMatch && identityMatch[1] && identityMatch[1].trim()) {
-    const candidate = identityMatch[1].trim();
-    const skip = new Set(["a", "an", "the", "session", "user"]);
-    if (candidate && !skip.has(candidate.toLowerCase())) {
-      return candidate;
-    }
-  }
-
-  const lower = text.toLowerCase();
-  if (lower.includes("sisyphus-junior") || lower.includes("sisyphus_junior")) return "Sisyphus-Junior";
-  if (lower.includes("sisyphus") || lower.includes("sisiphus")) return "Sisyphus";
-  if (lower.includes("oracle")) return "Oracle";
-  if (lower.includes("metis")) return "Metis";
-  if (lower.includes("momus")) return "Momus";
-  if (lower.includes("explore")) return "Explore";
-  if (lower.includes("librarian")) return "Librarian";
-  if (lower.includes("frontend-ui-ux") || lower.includes("visual-engineering")) return "Frontend";
-  if (lower.includes("hephaestus")) return "Hephaestus";
-  if (lower.includes("multimodal-looker")) return "Multimodal-Looker";
-  if (lower.includes("prometheus")) return "Prometheus";
-  if (lower.includes("atlas")) return "Atlas";
-  if (lower.includes("hermes")) return "Hermes";
-
-  const quotedMatches = text.matchAll(/You are ["']([^"']+)["']/gi);
-  for (const match of quotedMatches) {
-    if (match && match[1] && match[1].trim()) {
-      const candidate = match[1].trim();
-      const skip = new Set(["a", "an", "the", "ready", "here", "acting", "going", "designed", "powered", "system", "antigravity", "ai coding assistant"]);
-      if (!skip.has(candidate.toLowerCase())) {
-        return candidate;
-      }
-    }
+  const quotedMatch = text.match(/You are ["']([^"']+)["']/i);
+  if (quotedMatch && quotedMatch[1] && quotedMatch[1].trim()) {
+    return quotedMatch[1].trim();
   }
 
   const unquotedMatch = text.match(/You are ([A-Za-z0-9_-]+)(?:\s+|-|\.|,|$)/i);
   if (unquotedMatch && unquotedMatch[1]) {
     const candidate = unquotedMatch[1].trim();
-    const skipWords = new Set(["a", "an", "the", "ready", "here", "acting", "going", "designed", "powered", "system", "antigravity"]);
+    const skipWords = new Set(["a", "an", "the", "ready", "here", "acting", "going", "designed", "powered", "system"]);
     if (candidate && !skipWords.has(candidate.toLowerCase())) {
       return candidate;
     }
   }
 
   return undefined;
-}
-
-export function normalizeAgentPersona(raw: string): string {
-  if (!raw || typeof raw !== "string") return raw;
-  const trimmed = raw.trim();
-  if (!trimmed) return trimmed;
-
-  const lower = trimmed.toLowerCase();
-
-  if (
-    lower.includes("sisyphus-junior") ||
-    lower.includes("sisyphus_junior") ||
-    lower.includes("sisyphus junior")
-  ) {
-    return "Sisyphus-Junior";
-  }
-
-  if (
-    lower.includes("sisyphus") ||
-    lower.includes("sisiphus") ||
-    lower.includes("orchestrator") ||
-    lower.includes("orchestration")
-  ) {
-    return "Sisyphus";
-  }
-
-  if (lower.includes("oracle")) {
-    return "Oracle";
-  }
-
-  if (lower.includes("metis")) {
-    return "Metis";
-  }
-
-  if (lower.includes("momus")) {
-    return "Momus";
-  }
-
-  if (lower.includes("explore")) {
-    return "Explore";
-  }
-
-  if (lower.includes("librarian")) {
-    return "Librarian";
-  }
-
-  if (
-    lower.includes("frontend") ||
-    lower.includes("visual-engineering") ||
-    lower.includes("visual_engineering") ||
-    lower.includes("visual engineering") ||
-    lower.includes("ui-ux") ||
-    lower.includes("ui_ux")
-  ) {
-    return "Frontend";
-  }
-
-  if (lower.includes("multimodal")) {
-    return "Multimodal-Looker";
-  }
-
-  if (
-    lower.includes("hephaestus") ||
-    lower === "deep" ||
-    lower.startsWith("deep-") ||
-    lower.startsWith("deep_") ||
-    lower.startsWith("deep ")
-  ) {
-    return "Hephaestus";
-  }
-
-  if (lower.includes("prometheus")) {
-    return "Prometheus";
-  }
-
-  if (lower.includes("atlas")) {
-    return "Atlas";
-  }
-
-  if (lower.includes("hermes")) {
-    return "Hermes";
-  }
-
-  if (lower.includes("build") || lower.includes("general")) {
-    return "Build";
-  }
-
-  return trimmed;
 }
 
 export function resolveAgentKey(
@@ -485,73 +344,44 @@ export function resolveAgentKey(
   const headerKeys = ["X-OpenCode-Agent", "X-Agent"];
   for (const key of headerKeys) {
     const val = getHeaderValue(headers, key) ?? getHeaderValue(requestPayload, key);
-    if (val) return normalizeAgentPersona(val);
+    if (val) return val;
   }
 
   if (typeof requestPayload === "string" && requestPayload.trim()) {
-    const parsed = parseAgentFromSystemPrompt(requestPayload);
-    return parsed ? normalizeAgentPersona(parsed) : undefined;
+    return parseAgentFromSystemPrompt(requestPayload);
   }
 
   if (requestPayload && typeof requestPayload === "object" && !(requestPayload instanceof Headers)) {
     const payload = requestPayload as Record<string, unknown>;
-    const reqObj = (payload.request && typeof payload.request === "object")
-      ? (payload.request as Record<string, unknown>)
-      : payload;
     const metadata = (payload.metadata && typeof payload.metadata === "object")
       ? (payload.metadata as Record<string, unknown>)
-      : (reqObj.metadata && typeof reqObj.metadata === "object")
-      ? (reqObj.metadata as Record<string, unknown>)
       : undefined;
 
-    const systemText = extractSystemPromptText(payload);
-    if (systemText) {
-      const parsed = parseAgentFromSystemPrompt(systemText);
-      if (parsed) {
-        const normalized = normalizeAgentPersona(parsed);
-        if (normalized) return normalized;
-      }
-    }
-
-    const subagentCandidates = [
+    const payloadCandidates = [
+      payload.agent,
+      payload.agent_name,
+      payload.agentName,
       payload.subagent,
       payload.subagent_type,
       payload.subagentType,
-      reqObj.subagent,
-      reqObj.subagent_type,
-      reqObj.subagentType,
+      metadata?.agent,
+      metadata?.agent_name,
+      metadata?.agentName,
       metadata?.subagent,
       metadata?.subagent_type,
       metadata?.subagentType,
     ];
 
-    for (const c of subagentCandidates) {
+    for (const c of payloadCandidates) {
       if (typeof c === "string" && c.trim()) {
-        const normalized = normalizeAgentPersona(c.trim());
-        if (normalized) return normalized;
+        return c.trim();
       }
     }
 
-    const generalCandidates = [
-      payload.agent_name,
-      payload.agentName,
-      reqObj.agent_name,
-      reqObj.agentName,
-      metadata?.agent_name,
-      metadata?.agentName,
-      payload.agent,
-      reqObj.agent,
-      metadata?.agent,
-      payload.category,
-      reqObj.category,
-      metadata?.category,
-    ];
-
-    for (const c of generalCandidates) {
-      if (typeof c === "string" && c.trim()) {
-        const normalized = normalizeAgentPersona(c.trim());
-        if (normalized) return normalized;
-      }
+    const systemText = extractSystemPromptText(payload);
+    if (systemText) {
+      const parsed = parseAgentFromSystemPrompt(systemText);
+      if (parsed) return parsed;
     }
   }
 
@@ -2165,7 +1995,6 @@ export function prepareAntigravityRequest(
     headers.set("X-Goog-Api-Client", GEMINI_CLI_HEADERS["X-Goog-Api-Client"]);
     headers.set("Client-Metadata", GEMINI_CLI_HEADERS["Client-Metadata"]);
   }
-  throw new Error("[ANTIGRAVITY PAYLOAD DEBUG] " + JSON.stringify(body));
   return {
     request: transformedUrl,
     init: {
@@ -2554,7 +2383,6 @@ export const __testExports = {
   resolveConversationKey,
   resolveProjectKey,
   resolveAgentKey,
-  normalizeAgentPersona,
   isGeminiToolUsePart,
   isGeminiThinkingPart,
   ensureThoughtSignature,
