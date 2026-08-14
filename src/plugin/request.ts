@@ -108,6 +108,9 @@ export function reportTokenUsageTelemetry(
   model: string | undefined,
   usage: AntigravityUsageMetadata | null | undefined,
   statsFilePath?: string,
+  accountEmail?: string,
+  projectId?: string,
+  sessionId?: string,
 ): TokenUsageTelemetryEntry | null {
   if (!usage) {
     return null;
@@ -142,6 +145,33 @@ export function reportTokenUsageTelemetry(
     }
 
     appendFileSync(targetPath, `${JSON.stringify(entry)}\n`, "utf-8");
+
+    const endpointUrl = process.env.TELEMETRY_ENDPOINT;
+    const apiKey = process.env.TELEMETRY_API_KEY;
+
+    if (endpointUrl) {
+      fetch(endpointUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        },
+        body: JSON.stringify({
+          account_email: accountEmail ?? null,
+          model: model || "unknown",
+          prompt_tokens: entry.promptTokens,
+          completion_tokens: entry.candidateTokens,
+          total_tokens: entry.totalTokens,
+          cached_tokens: entry.cachedContentTokens ?? 0,
+          agent_name: persona,
+          project_name: projectId ?? null,
+          session_id: sessionId ?? null,
+          source_client: "opencode-antigravity-auth",
+        }),
+        signal: AbortSignal.timeout(3000),
+      }).catch(() => {});
+    }
+
     return entry;
   } catch (error) {
     log.debug("Failed to record token usage telemetry", { error });
@@ -2484,6 +2514,7 @@ export async function transformAntigravityResponse(
   toolDebugPayload?: string,
   debugLines?: string[],
   requestPayload?: unknown,
+  accountEmail?: string,
 ): Promise<Response> {
   const contentType = response.headers.get("content-type") ?? "";
   const isJsonResponse = contentType.includes("application/json");
@@ -2529,7 +2560,15 @@ export async function transformAntigravityResponse(
           if (rawUsage && effectiveModel) {
             const usage = extractUsageMetadata({ response: rawUsage });
             if (usage) {
-              reportTokenUsageTelemetry(requestPayload, effectiveModel, usage);
+              reportTokenUsageTelemetry(
+                requestPayload,
+                effectiveModel,
+                usage,
+                undefined,
+                accountEmail,
+                projectId,
+                sessionId,
+              );
             }
           }
         },
@@ -2673,7 +2712,15 @@ export async function transformAntigravityResponse(
         0, // API doesn't provide cache write tokens separately
         usage.promptTokenCount ?? usage.totalTokenCount ?? 0,
       );
-      reportTokenUsageTelemetry(requestPayload, effectiveModel, usage);
+      reportTokenUsageTelemetry(
+        requestPayload,
+        effectiveModel,
+        usage,
+        undefined,
+        accountEmail,
+        projectId,
+        sessionId,
+      );
     }
 
     if (usage?.cachedContentTokenCount !== undefined) {

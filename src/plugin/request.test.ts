@@ -1886,4 +1886,110 @@ describe("reportTokenUsageTelemetry", () => {
 
     rmSync(tmpDir, { recursive: true, force: true });
   });
+
+  it("dispatches HTTP telemetry payload via fetch without blocking or throwing", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "antigravity-test-"));
+    const statsFilePath = join(tmpDir, "antigravity-usage-stats.json");
+
+    const originalFetch = globalThis.fetch;
+    const originalEndpoint = process.env.TELEMETRY_ENDPOINT;
+    const originalApiKey = process.env.TELEMETRY_API_KEY;
+
+    process.env.TELEMETRY_ENDPOINT = "https://telemetry.example.com/status/record_usage";
+    process.env.TELEMETRY_API_KEY = "test-telemetry-api-key";
+
+    let fetchCalled = false;
+    let fetchUrl = "";
+    let fetchOptions: any = null;
+
+    globalThis.fetch = (url: any, opts: any) => {
+      fetchCalled = true;
+      fetchUrl = url.toString();
+      fetchOptions = opts;
+      return Promise.resolve(new Response(JSON.stringify({ status: "ok" }), { status: 200 }));
+    };
+
+    try {
+      const payload = {
+        systemInstruction: { parts: [{ text: "You are Sisyphus-Junior" }] },
+      };
+      const usage = {
+        promptTokenCount: 100,
+        candidatesTokenCount: 50,
+        totalTokenCount: 150,
+        cachedContentTokenCount: 20,
+      };
+
+      const result = reportTokenUsageTelemetry(
+        payload,
+        "gemini-3.7-flash",
+        usage,
+        statsFilePath,
+        "test@example.com",
+        "proj-123",
+        "ses-456",
+      );
+
+      expect(result).not.toBeNull();
+      expect(fetchCalled).toBe(true);
+      expect(fetchUrl).toBe("https://telemetry.example.com/status/record_usage");
+      expect(fetchOptions.method).toBe("POST");
+      expect(fetchOptions.headers["Authorization"]).toBe(
+        "Bearer test-telemetry-api-key",
+      );
+
+      const sentBody = JSON.parse(fetchOptions.body);
+      expect(sentBody).toEqual({
+        account_email: "test@example.com",
+        model: "gemini-3.7-flash",
+        prompt_tokens: 100,
+        completion_tokens: 50,
+        total_tokens: 150,
+        cached_tokens: 20,
+        agent_name: "Sisyphus-Junior",
+        project_name: "proj-123",
+        session_id: "ses-456",
+        source_client: "opencode-antigravity-auth",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalEndpoint !== undefined) {
+        process.env.TELEMETRY_ENDPOINT = originalEndpoint;
+      } else {
+        delete process.env.TELEMETRY_ENDPOINT;
+      }
+      if (originalApiKey !== undefined) {
+        process.env.TELEMETRY_API_KEY = originalApiKey;
+      } else {
+        delete process.env.TELEMETRY_API_KEY;
+      }
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("handles fetch failure gracefully without throwing", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "antigravity-test-"));
+    const statsFilePath = join(tmpDir, "antigravity-usage-stats.json");
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = () => Promise.reject(new Error("Network Error"));
+
+    try {
+      const payload = { system: "You are Sisyphus" };
+      const usage = { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 };
+
+      expect(() => {
+        reportTokenUsageTelemetry(
+          payload,
+          "model",
+          usage,
+          statsFilePath,
+          "test@example.com",
+        );
+      }).not.toThrow();
+    } finally {
+      globalThis.fetch = originalFetch;
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

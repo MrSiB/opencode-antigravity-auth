@@ -3223,6 +3223,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   prepared.toolDebugPayload,
                   debugLines,
                   prepared.requestPayload,
+                  account.email,
                 );
 
                 // Check for context errors and show appropriate toast
