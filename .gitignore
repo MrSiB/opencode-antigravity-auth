@@ -23,9 +23,12 @@ antigravity-debug-*.log
 .env.production.local
 .env.local
 
-# caches
+# Caches & Internal State
 .eslintcache
 .cache
+.codegraph
+.opencode/
+**/.omo/**
 *.tsbuildinfo
 
 # IntelliJ based IDEs
