@@ -103,6 +103,38 @@ export interface TokenUsageTelemetryEntry {
   thoughtsTokens?: number;
 }
 
+const PLACEHOLDER_EMAILS = new Set([
+  "local-opencode",
+  "local-developer",
+  "direct-plugin",
+  "account 1",
+  "idx-0",
+  "anonymous",
+  "null",
+  "undefined",
+]);
+
+export function sanitizeAccountEmail(email: unknown): string | null {
+  if (typeof email !== "string") {
+    return null;
+  }
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (PLACEHOLDER_EMAILS.has(normalized)) {
+    return null;
+  }
+  if (
+    normalized.includes("@example.com") &&
+    process.env.NODE_ENV !== "test" &&
+    !process.env.VITEST
+  ) {
+    return null;
+  }
+  return normalized;
+}
+
 export function reportTokenUsageTelemetry(
   requestPayload: unknown,
   model: string | undefined,
@@ -146,6 +178,15 @@ export function reportTokenUsageTelemetry(
 
     appendFileSync(targetPath, `${JSON.stringify(entry)}\n`, "utf-8");
 
+    const payloadEmail =
+      typeof requestPayload === "object" && requestPayload !== null
+        ? (requestPayload as Record<string, unknown>)._accountEmail
+        : undefined;
+
+    const resolvedEmail =
+      sanitizeAccountEmail(accountEmail) ??
+      sanitizeAccountEmail(payloadEmail);
+
     const endpointUrl = process.env.TELEMETRY_ENDPOINT;
     const apiKey = process.env.TELEMETRY_API_KEY;
 
@@ -157,7 +198,7 @@ export function reportTokenUsageTelemetry(
           ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
         },
         body: JSON.stringify({
-          account_email: accountEmail ?? null,
+          account_email: resolvedEmail ?? null,
           model: model || "unknown",
           prompt_tokens: entry.promptTokens,
           completion_tokens: entry.candidateTokens,

@@ -6,6 +6,7 @@ import {
   prepareAntigravityRequest,
   transformAntigravityResponse,
   reportTokenUsageTelemetry,
+  sanitizeAccountEmail,
   getPluginSessionId,
   isGenerativeLanguageRequest,
   __testExports,
@@ -1902,9 +1903,9 @@ describe("reportTokenUsageTelemetry", () => {
     let fetchUrl = "";
     let fetchOptions: any = null;
 
-    globalThis.fetch = (url: any, opts: any) => {
+    globalThis.fetch = (_url: any, opts: any) => {
       fetchCalled = true;
-      fetchUrl = url.toString();
+      fetchUrl = _url.toString();
       fetchOptions = opts;
       return Promise.resolve(new Response(JSON.stringify({ status: "ok" }), { status: 200 }));
     };
@@ -1989,6 +1990,371 @@ describe("reportTokenUsageTelemetry", () => {
       }).not.toThrow();
     } finally {
       globalThis.fetch = originalFetch;
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sanitizes account emails and filters placeholders correctly", () => {
+    expect(sanitizeAccountEmail(" USER@GMAIL.COM ")).toBe("user@gmail.com");
+    expect(sanitizeAccountEmail("local-opencode")).toBeNull();
+    expect(sanitizeAccountEmail("local-developer")).toBeNull();
+    expect(sanitizeAccountEmail("direct-plugin")).toBeNull();
+    expect(sanitizeAccountEmail("account 1")).toBeNull();
+    expect(sanitizeAccountEmail("idx-0")).toBeNull();
+    expect(sanitizeAccountEmail("anonymous")).toBeNull();
+    expect(sanitizeAccountEmail("null")).toBeNull();
+    expect(sanitizeAccountEmail("undefined")).toBeNull();
+    expect(sanitizeAccountEmail("   ")).toBeNull();
+    expect(sanitizeAccountEmail(123)).toBeNull();
+    expect(sanitizeAccountEmail(null)).toBeNull();
+  });
+
+  it("extracts _accountEmail from payload when accountEmail argument is missing/placeholder", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "antigravity-test-"));
+    const statsFilePath = join(tmpDir, "antigravity-usage-stats.json");
+
+    const originalFetch = globalThis.fetch;
+    const originalEndpoint = process.env.TELEMETRY_ENDPOINT;
+    process.env.TELEMETRY_ENDPOINT = "https://telemetry.example.com/status/record_usage";
+
+    let sentEmail: string | null = null;
+    globalThis.fetch = (_url: any, opts: any) => {
+      const body = JSON.parse(opts.body);
+      sentEmail = body.account_email;
+      return Promise.resolve(new Response(JSON.stringify({ status: "ok" }), { status: 200 }));
+    };
+
+    try {
+      const payload = { _accountEmail: "RealUser@Gmail.Com" };
+      const usage = { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 };
+
+      reportTokenUsageTelemetry(
+        payload,
+        "model",
+        usage,
+        statsFilePath,
+        "local-opencode",
+      );
+
+      expect(sentEmail).toBe("realuser@gmail.com");
+
+      reportTokenUsageTelemetry(
+        "string-payload",
+        "model",
+        usage,
+        statsFilePath,
+      );
+      expect(sentEmail).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalEndpoint !== undefined) {
+        process.env.TELEMETRY_ENDPOINT = originalEndpoint;
+      } else {
+        delete process.env.TELEMETRY_ENDPOINT;
+      }
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("handles @example.com email filtering based on environment variables", () => {
+    const origNodeEnv = process.env.NODE_ENV;
+    const origVitest = process.env.VITEST;
+
+    try {
+      expect(sanitizeAccountEmail("user@example.com")).toBe("user@example.com");
+
+      delete process.env.VITEST;
+      process.env.NODE_ENV = "production";
+      expect(sanitizeAccountEmail("user@example.com")).toBeNull();
+      expect(sanitizeAccountEmail("user@gmail.com")).toBe("user@gmail.com");
+    } finally {
+      if (origNodeEnv !== undefined) {
+        process.env.NODE_ENV = origNodeEnv;
+      } else {
+        delete process.env.NODE_ENV;
+      }
+      if (origVitest !== undefined) {
+        process.env.VITEST = origVitest;
+      } else {
+        delete process.env.VITEST;
+      }
+    }
+  });
+
+  it("dispatches telemetry with valid email in account_email when passed", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "antigravity-test-"));
+    const statsFilePath = join(tmpDir, "antigravity-usage-stats.json");
+
+    const originalFetch = globalThis.fetch;
+    const originalEndpoint = process.env.TELEMETRY_ENDPOINT;
+    process.env.TELEMETRY_ENDPOINT = "https://telemetry.example.com/status/record_usage";
+
+    let sentEmail: string | null = undefined as any;
+    globalThis.fetch = (_url: any, opts: any) => {
+      const body = JSON.parse(opts.body);
+      sentEmail = body.account_email;
+      return Promise.resolve(new Response(JSON.stringify({ status: "ok" }), { status: 200 }));
+    };
+
+    try {
+      const payload = { systemInstruction: { parts: [{ text: "Agent" }] } };
+      const usage = { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 };
+
+      reportTokenUsageTelemetry(
+        payload,
+        "gemini-3.7-flash",
+        usage,
+        statsFilePath,
+        "user@gmail.com",
+      );
+
+      expect(sentEmail).toBe("user@gmail.com");
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalEndpoint !== undefined) {
+        process.env.TELEMETRY_ENDPOINT = originalEndpoint;
+      } else {
+        delete process.env.TELEMETRY_ENDPOINT;
+      }
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("dispatches telemetry with account_email: null when placeholder strings are passed", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "antigravity-test-"));
+    const statsFilePath = join(tmpDir, "antigravity-usage-stats.json");
+
+    const originalFetch = globalThis.fetch;
+    const originalEndpoint = process.env.TELEMETRY_ENDPOINT;
+    process.env.TELEMETRY_ENDPOINT = "https://telemetry.example.com/status/record_usage";
+
+    let sentEmail: string | null = undefined as any;
+    globalThis.fetch = (_url: any, opts: any) => {
+      const body = JSON.parse(opts.body);
+      sentEmail = body.account_email;
+      return Promise.resolve(new Response(JSON.stringify({ status: "ok" }), { status: 200 }));
+    };
+
+    try {
+      const payload = { systemInstruction: { parts: [{ text: "Agent" }] } };
+      const usage = { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 };
+
+      const placeholders = ["local-opencode", "direct-plugin", "anonymous", "account 1", "idx-0", "null", "undefined"];
+      for (const placeholder of placeholders) {
+        reportTokenUsageTelemetry(
+          payload,
+          "gemini-3.7-flash",
+          usage,
+          statsFilePath,
+          placeholder,
+        );
+        expect(sentEmail).toBeNull();
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalEndpoint !== undefined) {
+        process.env.TELEMETRY_ENDPOINT = originalEndpoint;
+      } else {
+        delete process.env.TELEMETRY_ENDPOINT;
+      }
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("dispatches telemetry with account_email formatting in non-streaming mode through transformAntigravityResponse", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "antigravity-test-"));
+    const originalFetch = globalThis.fetch;
+    const originalEndpoint = process.env.TELEMETRY_ENDPOINT;
+    process.env.TELEMETRY_ENDPOINT = "https://telemetry.example.com/status/record_usage";
+
+    let sentEmail: string | null = undefined as any;
+    globalThis.fetch = (_url: any, opts: any) => {
+      const body = JSON.parse(opts.body);
+      sentEmail = body.account_email;
+      return Promise.resolve(new Response(JSON.stringify({ status: "ok" }), { status: 200 }));
+    };
+
+    try {
+      const response = new Response(
+        JSON.stringify({
+          response: {
+            candidates: [{ content: { parts: [{ text: "Done" }] } }],
+            usageMetadata: {
+              promptTokenCount: 100,
+              candidatesTokenCount: 25,
+              totalTokenCount: 125,
+            },
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+      const transformed = await transformAntigravityResponse(
+        response,
+        false,
+        undefined,
+        "antigravity-gemini-3-flash",
+        "project",
+        "endpoint",
+        "gemini-3-flash",
+        "session",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { systemInstruction: { parts: [{ text: "Agent" }] } },
+        "user@gmail.com",
+      );
+
+      await transformed.text();
+      expect(sentEmail).toBe("user@gmail.com");
+
+      const response2 = new Response(
+        JSON.stringify({
+          response: {
+            candidates: [{ content: { parts: [{ text: "Done" }] } }],
+            usageMetadata: {
+              promptTokenCount: 100,
+              candidatesTokenCount: 25,
+              totalTokenCount: 125,
+            },
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+      const transformed2 = await transformAntigravityResponse(
+        response2,
+        false,
+        undefined,
+        "antigravity-gemini-3-flash",
+        "project",
+        "endpoint",
+        "gemini-3-flash",
+        "session",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { systemInstruction: { parts: [{ text: "Agent" }] } },
+        "local-opencode",
+      );
+
+      await transformed2.text();
+      expect(sentEmail).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalEndpoint !== undefined) {
+        process.env.TELEMETRY_ENDPOINT = originalEndpoint;
+      } else {
+        delete process.env.TELEMETRY_ENDPOINT;
+      }
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("dispatches telemetry with account_email formatting in streaming SSE mode through transformAntigravityResponse", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "antigravity-test-"));
+    const originalFetch = globalThis.fetch;
+    const originalEndpoint = process.env.TELEMETRY_ENDPOINT;
+    process.env.TELEMETRY_ENDPOINT = "https://telemetry.example.com/status/record_usage";
+
+    let sentEmail: string | null = undefined as any;
+    globalThis.fetch = (_url: any, opts: any) => {
+      const body = JSON.parse(opts.body);
+      sentEmail = body.account_email;
+      return Promise.resolve(new Response(JSON.stringify({ status: "ok" }), { status: 200 }));
+    };
+
+    try {
+      const sseChunk = `data: ${JSON.stringify({
+        response: {
+          candidates: [{ content: { parts: [{ text: "Hello stream" }] } }],
+          usageMetadata: {
+            promptTokenCount: 50,
+            candidatesTokenCount: 10,
+            totalTokenCount: 60,
+          },
+        },
+      })}\n\n`;
+
+      const response = new Response(sseChunk, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+
+      const transformed = await transformAntigravityResponse(
+        response,
+        true,
+        undefined,
+        "antigravity-gemini-3-flash",
+        "project",
+        "endpoint",
+        "gemini-3-flash",
+        "session",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { systemInstruction: { parts: [{ text: "Agent" }] } },
+        "user@gmail.com",
+      );
+
+      const reader = transformed.body!.getReader();
+      while (true) {
+        const { done } = await reader.read();
+        if (done) break;
+      }
+
+      expect(sentEmail).toBe("user@gmail.com");
+
+      const sseChunk2 = `data: ${JSON.stringify({
+        response: {
+          candidates: [{ content: { parts: [{ text: "Hello stream" }] } }],
+          usageMetadata: {
+            promptTokenCount: 50,
+            candidatesTokenCount: 10,
+            totalTokenCount: 60,
+          },
+        },
+      })}\n\n`;
+
+      const response2 = new Response(sseChunk2, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+
+      const transformed2 = await transformAntigravityResponse(
+        response2,
+        true,
+        undefined,
+        "antigravity-gemini-3-flash",
+        "project",
+        "endpoint",
+        "gemini-3-flash",
+        "session",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { systemInstruction: { parts: [{ text: "Agent" }] } },
+        "direct-plugin",
+      );
+
+      const reader2 = transformed2.body!.getReader();
+      while (true) {
+        const { done } = await reader2.read();
+        if (done) break;
+      }
+
+      expect(sentEmail).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalEndpoint !== undefined) {
+        process.env.TELEMETRY_ENDPOINT = originalEndpoint;
+      } else {
+        delete process.env.TELEMETRY_ENDPOINT;
+      }
       rmSync(tmpDir, { recursive: true, force: true });
     }
   });

@@ -2048,6 +2048,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
             toolDebugMissing?: number;
             toolDebugSummary?: string;
             toolDebugPayload?: string;
+            requestPayload?: unknown;
+            accountEmail?: string;
           };
 
           let lastFailure: FailureContext | null = null;
@@ -2228,6 +2230,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     lastFailure.toolDebugSummary,
                     lastFailure.toolDebugPayload,
                     debugLines,
+                    lastFailure.requestPayload,
+                    lastFailure.accountEmail,
                   );
                 }
                 const errorMessage =
@@ -2552,6 +2556,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   undefined,
                   undefined,
                   prepared.requestPayload,
+                  account.email,
                 );
                 await transformed.text();
                 markWarmupSuccess(prepared.sessionId);
@@ -2702,6 +2707,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   toolDebugMissing: prepared.toolDebugMissing,
                   toolDebugSummary: prepared.toolDebugSummary,
                   toolDebugPayload: prepared.toolDebugPayload,
+                  requestPayload: prepared.requestPayload,
+                  accountEmail: account.email,
                 });
 
                 await runThinkingWarmup(prepared, projectContext.effectiveProjectId);
@@ -3319,6 +3326,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     lastFailure.toolDebugSummary,
                     lastFailure.toolDebugPayload,
                     debugLines,
+                    lastFailure.requestPayload,
+                    lastFailure.accountEmail,
                   );
                 }
 
@@ -3355,6 +3364,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 lastFailure.toolDebugSummary,
                 lastFailure.toolDebugPayload,
                 debugLines,
+                lastFailure.requestPayload,
+                lastFailure.accountEmail,
               );
             }
 
