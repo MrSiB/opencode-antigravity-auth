@@ -638,6 +638,11 @@ function sanitizeRequestPayloadForAntigravity(
       }
     }
   }
+
+  delete anyPayload.agent;
+  delete anyPayload.persona;
+  delete anyPayload.agent_persona;
+  delete anyPayload.agentPersona;
 }
 
 function isGeminiToolUsePart(part: any): boolean {
