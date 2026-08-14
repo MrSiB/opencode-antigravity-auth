@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import {
   ANTIGRAVITY_ENDPOINT,
   GEMINI_CLI_ENDPOINT,
@@ -34,6 +36,7 @@ import {
   extractVariantThinkingConfig,
   extractUsageFromSsePayload,
   extractUsageMetadata,
+  extractAgentPersona,
   fixToolResponseGrouping,
   getThinkingText,
   validateAndFixClaudeToolPairing,
@@ -47,6 +50,7 @@ import {
   rewriteAntigravityPreviewAccessError,
   transformThinkingParts,
   type AntigravityApiBody,
+  type AntigravityUsageMetadata,
 } from "./request-helpers";
 import {
   CLAUDE_TOOL_SYSTEM_INSTRUCTION,
@@ -83,9 +87,67 @@ import {
   buildFingerprintHeaders,
   type Fingerprint,
 } from "./fingerprint";
+import { getConfigDir } from "./storage";
 import type { GoogleSearchConfig } from "./transform/types";
 
 const log = createLogger("request");
+
+export interface TokenUsageTelemetryEntry {
+  timestamp: string;
+  model: string;
+  persona: string;
+  promptTokens: number;
+  candidateTokens: number;
+  totalTokens: number;
+  cachedContentTokens?: number;
+  thoughtsTokens?: number;
+}
+
+export function reportTokenUsageTelemetry(
+  requestPayload: unknown,
+  model: string | undefined,
+  usage: AntigravityUsageMetadata | null | undefined,
+  statsFilePath?: string,
+): TokenUsageTelemetryEntry | null {
+  if (!usage) {
+    return null;
+  }
+
+  try {
+    const persona = extractAgentPersona(requestPayload);
+    const targetPath =
+      statsFilePath ?? join(getConfigDir(), "antigravity-usage-stats.json");
+
+    const configDir = dirname(targetPath);
+    if (!existsSync(configDir)) {
+      mkdirSync(configDir, { recursive: true });
+    }
+
+    const entry: TokenUsageTelemetryEntry = {
+      timestamp: new Date().toISOString(),
+      model: model || "unknown",
+      persona,
+      promptTokens: usage.promptTokenCount ?? 0,
+      candidateTokens: usage.candidatesTokenCount ?? 0,
+      totalTokens:
+        usage.totalTokenCount ??
+        (usage.promptTokenCount ?? 0) + (usage.candidatesTokenCount ?? 0),
+    };
+
+    if (usage.cachedContentTokenCount !== undefined) {
+      entry.cachedContentTokens = usage.cachedContentTokenCount;
+    }
+    if (usage.thoughtsTokenCount !== undefined) {
+      entry.thoughtsTokens = usage.thoughtsTokenCount;
+    }
+
+    appendFileSync(targetPath, `${JSON.stringify(entry)}\n`, "utf-8");
+    return entry;
+  } catch (error) {
+    log.debug("Failed to record token usage telemetry", { error });
+    return null;
+  }
+}
 
 const PLUGIN_SESSION_ID = `-${crypto.randomUUID()}`;
 
@@ -1140,6 +1202,7 @@ interface PreparedAntigravityRequest {
   needsSignedThinkingWarmup?: boolean;
   headerStyle: HeaderStyle;
   thinkingRecoveryMessage?: string;
+  requestPayload?: Record<string, unknown>;
 }
 
 export function prepareAntigravityRequest(
@@ -1290,6 +1353,7 @@ export function prepareAntigravityRequest(
   );
 
   let body = baseInit.body;
+  let parsedRequestPayload: Record<string, unknown> | undefined;
   if (typeof baseInit.body === "string" && baseInit.body) {
     try {
       const parsedBody = JSON.parse(baseInit.body) as Record<string, unknown>;
@@ -1392,6 +1456,9 @@ export function prepareAntigravityRequest(
 
         if (requestObjects.length > 0) {
           sessionId = signatureSessionKey;
+          parsedRequestPayload = requestObjects[0];
+        } else {
+          parsedRequestPayload = parsedBody;
         }
 
         for (const req of requestObjects) {
@@ -1454,6 +1521,7 @@ export function prepareAntigravityRequest(
         body = JSON.stringify(wrappedBody);
       } else {
         const requestPayload: Record<string, unknown> = { ...parsedBody };
+        parsedRequestPayload = requestPayload;
 
         const rawGenerationConfig = requestPayload.generationConfig as
           | Record<string, unknown>
@@ -2339,6 +2407,7 @@ export function prepareAntigravityRequest(
     needsSignedThinkingWarmup,
     headerStyle,
     thinkingRecoveryMessage,
+    requestPayload: parsedRequestPayload,
   };
 }
 
@@ -2409,6 +2478,7 @@ export async function transformAntigravityResponse(
   toolDebugSummary?: string,
   toolDebugPayload?: string,
   debugLines?: string[],
+  requestPayload?: unknown,
 ): Promise<Response> {
   const contentType = response.headers.get("content-type") ?? "";
   const isJsonResponse = contentType.includes("application/json");
@@ -2450,6 +2520,14 @@ export async function transformAntigravityResponse(
         onInjectDebug: injectDebugThinking,
         // onInjectSyntheticThinking removed - keep_thinking now uses debugText path
         transformThinkingParts,
+        onUsageMetadata: (rawUsage) => {
+          if (rawUsage && effectiveModel) {
+            const usage = extractUsageMetadata({ response: rawUsage });
+            if (usage) {
+              reportTokenUsageTelemetry(requestPayload, effectiveModel, usage);
+            }
+          }
+        },
       },
       {
         signatureSessionKey: sessionId,
@@ -2590,6 +2668,7 @@ export async function transformAntigravityResponse(
         0, // API doesn't provide cache write tokens separately
         usage.promptTokenCount ?? usage.totalTokenCount ?? 0,
       );
+      reportTokenUsageTelemetry(requestPayload, effectiveModel, usage);
     }
 
     if (usage?.cachedContentTokenCount !== undefined) {

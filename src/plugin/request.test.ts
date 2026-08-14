@@ -1,7 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   prepareAntigravityRequest,
   transformAntigravityResponse,
+  reportTokenUsageTelemetry,
   getPluginSessionId,
   isGenerativeLanguageRequest,
   __testExports,
@@ -1771,5 +1775,115 @@ describe("getDisplayedThinkingHashes (per-session dedup scoping)", () => {
     // Re-fetching the evicted session yields a fresh empty Set.
     const refetched = getDisplayedThinkingHashes("evict-session-0");
     expect(refetched!.has("marker")).toBe(false);
+  });
+});
+
+describe("reportTokenUsageTelemetry", () => {
+  it("extracts agent persona and records usage stats without mutating requestPayload", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "antigravity-test-"));
+    const statsFilePath = join(tmpDir, "antigravity-usage-stats.json");
+
+    const payload = {
+      systemInstruction: {
+        parts: [{ text: "You are Sisyphus-Junior, a senior developer agent." }],
+      },
+      contents: [{ role: "user", parts: [{ text: "Hello" }] }],
+    };
+
+    const originalPayloadJson = JSON.stringify(payload);
+
+    const usage = {
+      promptTokenCount: 150,
+      candidatesTokenCount: 50,
+      totalTokenCount: 200,
+      cachedContentTokenCount: 10,
+    };
+
+    const result = reportTokenUsageTelemetry(
+      payload,
+      "gemini-3.7-flash",
+      usage,
+      statsFilePath,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result?.persona).toBe("Sisyphus-Junior");
+    expect(result?.model).toBe("gemini-3.7-flash");
+    expect(result?.promptTokens).toBe(150);
+    expect(result?.candidateTokens).toBe(50);
+    expect(result?.totalTokens).toBe(200);
+    expect(result?.cachedContentTokens).toBe(10);
+
+    expect(JSON.stringify(payload)).toBe(originalPayloadJson);
+
+    const fileContent = readFileSync(statsFilePath, "utf-8");
+    const record = JSON.parse(fileContent.trim());
+    expect(record.persona).toBe("Sisyphus-Junior");
+    expect(record.model).toBe("gemini-3.7-flash");
+    expect(record.promptTokens).toBe(150);
+
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("returns null when usage metadata is null or undefined", () => {
+    const payload = { system: "You are Sisyphus" };
+    expect(reportTokenUsageTelemetry(payload, "model", null)).toBeNull();
+    expect(reportTokenUsageTelemetry(payload, "model", undefined)).toBeNull();
+  });
+
+  it("handles non-writable target paths gracefully without throwing", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "antigravity-test-"));
+    const payload = { system: "You are Sisyphus" };
+    const usage = { promptTokenCount: 10, candidatesTokenCount: 10, totalTokenCount: 20 };
+    // Pass directory path as file path so appendFileSync throws EISDIR
+    const result = reportTokenUsageTelemetry(
+      payload,
+      "model",
+      usage,
+      tmpDir,
+    );
+    expect(result).toBeNull();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("logs token usage during transformAntigravityResponse non-streaming", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "antigravity-test-"));
+    const payload = {
+      systemInstruction: { parts: [{ text: "You are document-writer" }] },
+    };
+
+    const response = new Response(
+      JSON.stringify({
+        response: {
+          candidates: [{ content: { parts: [{ text: "Done" }] } }],
+          usageMetadata: {
+            promptTokenCount: 100,
+            candidatesTokenCount: 25,
+            totalTokenCount: 125,
+          },
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+
+    const transformed = await transformAntigravityResponse(
+      response,
+      false,
+      undefined,
+      "antigravity-gemini-3-flash",
+      "project",
+      "endpoint",
+      "gemini-3-flash",
+      "session",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      payload,
+    );
+
+    await transformed.text();
+
+    rmSync(tmpDir, { recursive: true, force: true });
   });
 });

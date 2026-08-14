@@ -2961,3 +2961,107 @@ data: ${JSON.stringify({ type: "message_stop" })}
     },
   });
 }
+
+const PERSONA_KEYWORDS = [
+  "Sisyphus-Junior",
+  "multimodal-looker",
+  "Sisyphus",
+  "Prometheus",
+  "Atlas",
+  "Oracle",
+  "Librarian",
+  "Explore",
+  "Momus",
+  "Metis",
+  "Hephaestus",
+] as const;
+
+function collectStringsFrom(val: unknown, visited = new WeakSet<object>()): string[] {
+  if (typeof val === "string") {
+    return [val];
+  }
+  if (!val || typeof val !== "object") {
+    return [];
+  }
+  if (visited.has(val as object)) {
+    return [];
+  }
+  visited.add(val as object);
+
+  const strings: string[] = [];
+  if (Array.isArray(val)) {
+    for (const item of val) {
+      strings.push(...collectStringsFrom(item, visited));
+    }
+  } else {
+    for (const value of Object.values(val as Record<string, unknown>)) {
+      strings.push(...collectStringsFrom(value, visited));
+    }
+  }
+  return strings;
+}
+
+function extractSystemInstructionText(payload: Record<string, unknown>): string {
+  const targets: unknown[] = [
+    payload.systemInstruction,
+    payload.system_instruction,
+    payload.system,
+  ];
+
+  if (Array.isArray(payload.messages)) {
+    for (const msg of payload.messages) {
+      if (msg && typeof msg === "object" && (msg as Record<string, unknown>).role === "system") {
+        targets.push(msg);
+      }
+    }
+  }
+  if (Array.isArray(payload.contents)) {
+    for (const content of payload.contents) {
+      if (content && typeof content === "object" && (content as Record<string, unknown>).role === "system") {
+        targets.push(content);
+      }
+    }
+  }
+
+  return collectStringsFrom(targets).join(" ");
+}
+
+function extractMessagesText(payload: Record<string, unknown>): string {
+  const targets: unknown[] = [];
+  if (payload.messages) targets.push(payload.messages);
+  if (payload.contents) targets.push(payload.contents);
+  if (payload.parts) targets.push(payload.parts);
+  return collectStringsFrom(targets).join(" ");
+}
+
+export function extractAgentPersona(payload: unknown): string {
+  if (!payload || typeof payload !== "object") {
+    return "Sisyphus";
+  }
+
+  const p = payload as Record<string, unknown>;
+
+  const systemText = extractSystemInstructionText(p);
+  for (const keyword of PERSONA_KEYWORDS) {
+    if (systemText.includes(keyword)) {
+      return keyword;
+    }
+  }
+
+  const messagesText = extractMessagesText(p);
+  for (const keyword of PERSONA_KEYWORDS) {
+    if (messagesText.includes(keyword)) {
+      return keyword;
+    }
+  }
+
+  const fullText = collectStringsFrom(p).join(" ");
+  for (const keyword of PERSONA_KEYWORDS) {
+    if (fullText.includes(keyword)) {
+      return keyword;
+    }
+  }
+
+  return "Sisyphus";
+}
+

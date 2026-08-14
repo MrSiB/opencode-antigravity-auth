@@ -2547,6 +2547,11 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   warmupUrl,
                   prepared.effectiveModel,
                   prepared.sessionId,
+                  undefined,
+                  undefined,
+                  undefined,
+                  undefined,
+                  prepared.requestPayload,
                 );
                 await transformed.text();
                 markWarmupSuccess(prepared.sessionId);
@@ -3217,6 +3222,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   prepared.toolDebugSummary,
                   prepared.toolDebugPayload,
                   debugLines,
+                  prepared.requestPayload,
                 );
 
                 // Check for context errors and show appropriate toast

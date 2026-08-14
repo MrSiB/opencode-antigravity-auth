@@ -15,6 +15,7 @@ export interface StreamingCallbacks {
   onInjectDebug?: (response: unknown, debugText: string) => unknown;
   // Note: onInjectSyntheticThinking removed - keep_thinking now unified with debug via debugText
   transformThinkingParts?: (parts: unknown) => unknown;
+  onUsageMetadata?: (usage: unknown) => void;
 }
 
 export interface StreamingOptions {

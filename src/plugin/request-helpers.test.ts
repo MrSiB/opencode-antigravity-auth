@@ -24,6 +24,7 @@ import {
   createSyntheticErrorResponse,
   recursivelyParseJsonStrings,
   getThinkingText,
+  extractAgentPersona,
 } from "./request-helpers";
 import { deduplicateThinkingText, createThoughtBuffer } from "./core/streaming/transformer";
 
@@ -2046,5 +2047,53 @@ describe("cleanJSONSchemaForAntigravity memoization", () => {
     // Second call for the identical shape should be served from cache.
     const cached = cleanJSONSchemaForAntigravity(structuredClone(schema));
     expect(cached).toEqual(uncached);
+  });
+});
+
+describe("extractAgentPersona", () => {
+  it("defaults to Sisyphus for empty, null, undefined, or primitive payloads", () => {
+    expect(extractAgentPersona(null)).toBe("Sisyphus");
+    expect(extractAgentPersona(undefined)).toBe("Sisyphus");
+    expect(extractAgentPersona(123)).toBe("Sisyphus");
+    expect(extractAgentPersona("string payload")).toBe("Sisyphus");
+    expect(extractAgentPersona({})).toBe("Sisyphus");
+  });
+
+  it("extracts keywords from systemInstruction", () => {
+    expect(extractAgentPersona({ systemInstruction: "You are Prometheus" })).toBe("Prometheus");
+    expect(extractAgentPersona({ systemInstruction: { parts: [{ text: "Identity: Atlas" }] } })).toBe("Atlas");
+    expect(extractAgentPersona({ system_instruction: "You are Oracle" })).toBe("Oracle");
+    expect(extractAgentPersona({ system: "You are Librarian" })).toBe("Librarian");
+  });
+
+  it("prioritizes Sisyphus-Junior over Sisyphus when both or Sisyphus-Junior is present", () => {
+    expect(extractAgentPersona({ systemInstruction: "You are Sisyphus-Junior - a focused executor" })).toBe("Sisyphus-Junior");
+    expect(extractAgentPersona({ systemInstruction: "You are Sisyphus" })).toBe("Sisyphus");
+  });
+
+  it("checks systemInstruction before messages or contents", () => {
+    const payload = {
+      systemInstruction: "You are Prometheus",
+      messages: [{ role: "user", content: "Hey Oracle" }],
+    };
+    expect(extractAgentPersona(payload)).toBe("Prometheus");
+  });
+
+  it("extracts keywords from messages or contents when systemInstruction has no match", () => {
+    expect(extractAgentPersona({ messages: [{ role: "user", content: "You are Explore" }] })).toBe("Explore");
+    expect(extractAgentPersona({ contents: [{ parts: [{ text: "You are Momus" }] }] })).toBe("Momus");
+    expect(extractAgentPersona({ messages: [{ role: "user", content: "You are Metis" }] })).toBe("Metis");
+    expect(extractAgentPersona({ messages: [{ role: "user", content: "You are Hephaestus" }] })).toBe("Hephaestus");
+    expect(extractAgentPersona({ messages: [{ role: "user", content: "You are multimodal-looker" }] })).toBe("multimodal-looker");
+  });
+
+  it("does not mutate the payload", () => {
+    const payload = {
+      systemInstruction: { parts: [{ text: "You are Prometheus" }] },
+      messages: [{ role: "user", content: "Hello" }],
+    };
+    const clone = structuredClone(payload);
+    extractAgentPersona(payload);
+    expect(payload).toEqual(clone);
   });
 });
