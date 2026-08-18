@@ -53,17 +53,17 @@ describe("resolveModelWithTier", () => {
       expect(result.quotaPreference).toBe("antigravity");
     });
 
-    it("gemini-3.7-flash models resolve to Gemini 3 Flash backend IDs", () => {
+    it("gemini-3.7-flash models resolve to bare gemini-3.7-flash", () => {
       const flash = resolveModelWithTier("antigravity-gemini-3.7-flash");
-      expect(flash.actualModel).toBe("gemini-3.7-flash-medium");
+      expect(flash.actualModel).toBe("gemini-3.7-flash");
       expect(flash.quotaPreference).toBe("antigravity");
 
       const flashHigh = resolveModelWithTier("antigravity-gemini-3.7-flash-high");
-      expect(flashHigh.actualModel).toBe("gemini-3.7-flash-high");
+      expect(flashHigh.actualModel).toBe("gemini-3.7-flash");
       expect(flashHigh.quotaPreference).toBe("antigravity");
 
       const flashMinimal = resolveModelWithTier("antigravity-gemini-3.7-flash-minimal");
-      expect(flashMinimal.actualModel).toBe("gemini-3.7-flash-low");
+      expect(flashMinimal.actualModel).toBe("gemini-3.7-flash");
       expect(flashMinimal.quotaPreference).toBe("antigravity");
     });
 
