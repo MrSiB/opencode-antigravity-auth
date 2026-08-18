@@ -1793,7 +1793,7 @@ export const createAntigravityPlugin = (providerId) => async ({ client, director
                                 if (accountManager.areAllAccountsOverSoftQuota(family, config.soft_quota_threshold_percent, softQuotaCacheTtlMs, model, preferredHeaderStyle)) {
                                     const threshold = config.soft_quota_threshold_percent;
                                     const softQuotaWaitMs = accountManager.getMinWaitTimeForSoftQuota(family, threshold, softQuotaCacheTtlMs, model, preferredHeaderStyle);
-                                    const maxWaitMs = (config.max_rate_limit_wait_seconds ?? 300) * 1000;
+                                    const maxWaitMs = (config.max_rate_limit_wait_seconds ?? 15) * 1000;
                                     const response = await tryAgySdkFallbackForRequest(input, init, config, agySdkCredentials, urlString);
                                     if (response)
                                         return response;
@@ -1833,7 +1833,7 @@ export const createAntigravityPlugin = (providerId) => async ({ client, director
                                 }
                                 // If wait time exceeds max threshold, return error immediately instead of hanging
                                 // 0 means disabled (wait indefinitely)
-                                const maxWaitMs = (config.max_rate_limit_wait_seconds ?? 300) * 1000;
+                                const maxWaitMs = (config.max_rate_limit_wait_seconds ?? 15) * 1000;
                                 const response = await tryAgySdkFallbackForRequest(input, init, config, agySdkCredentials, urlString);
                                 if (response)
                                     return response;

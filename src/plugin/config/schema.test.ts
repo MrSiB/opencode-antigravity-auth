@@ -83,3 +83,9 @@ describe("model_discovery config", () => {
     });
   });
 });
+
+describe("max_rate_limit_wait_seconds config", () => {
+  it("defaults max_rate_limit_wait_seconds to 15", () => {
+    expect(DEFAULT_CONFIG.max_rate_limit_wait_seconds).toBe(15);
+  });
+});

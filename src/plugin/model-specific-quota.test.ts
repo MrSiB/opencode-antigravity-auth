@@ -77,4 +77,25 @@ describe("Model-specific Gemini quota", () => {
     expect(manager.isRateLimitedForHeaderStyle(account, "gemini", "antigravity", modelPro)).toBe(true);
     expect(manager.isRateLimitedForHeaderStyle(account, "gemini", "antigravity", "gemini-1.5-flash")).toBe(true);
   });
+
+  it("caps short-term model-specific rate limit duration to at most 60 seconds", () => {
+    const account = manager.getCurrentAccountForFamily("gemini")!;
+    const model = "gemini-3.7-flash";
+
+    manager.markRateLimited(account, 300000, "gemini", "antigravity", model);
+
+    const resetTime = account.rateLimitResetTimes["gemini-antigravity:gemini-3.7-flash"];
+    expect(resetTime).toBeDefined();
+    expect(resetTime! - Date.now()).toBeLessThanOrEqual(60000);
+  });
+
+  it("expires short-term model-specific rate limits after at most 60 seconds", () => {
+    const account = manager.getCurrentAccountForFamily("gemini")!;
+    const model = "gemini-3.7-flash";
+
+    manager.markRateLimited(account, 60000, "gemini", "antigravity", model);
+    account.rateLimitSetTimes["gemini-antigravity:gemini-3.7-flash"] = Date.now() - 61000;
+
+    expect(manager.isRateLimitedForHeaderStyle(account, "gemini", "antigravity", model)).toBe(false);
+  });
 });

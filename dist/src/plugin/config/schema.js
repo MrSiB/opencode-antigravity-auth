@@ -248,9 +248,9 @@ export const AntigravityConfigSchema = z.object({
      *
      * Set to 0 to disable (wait indefinitely).
      *
-     * @default 300 (5 minutes)
+     * @default 15 (seconds)
      */
-    max_rate_limit_wait_seconds: z.number().min(0).max(3600).default(300),
+    max_rate_limit_wait_seconds: z.number().min(0).max(3600).default(15),
     /**
      * @deprecated Kept only for backward compatibility.
      * This flag is ignored at runtime.
@@ -447,7 +447,7 @@ export const DEFAULT_CONFIG = {
     proactive_token_refresh: true,
     proactive_refresh_buffer_seconds: 1800,
     proactive_refresh_check_interval_seconds: 300,
-    max_rate_limit_wait_seconds: 300,
+    max_rate_limit_wait_seconds: 15,
     quota_fallback: false,
     cli_first: false,
     agy_sdk: {

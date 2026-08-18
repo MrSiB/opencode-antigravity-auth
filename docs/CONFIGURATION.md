@@ -185,7 +185,7 @@ These settings are `false` by default:
 | `empty_response_retry_delay_ms` | `2000` | Delay between retries |
 | `tool_id_recovery` | `true` | Fix mismatched tool IDs from context compaction |
 | `claude_tool_hardening` | `true` | Prevent tool parameter hallucination |
-| `max_rate_limit_wait_seconds` | `300` | Max wait time when rate limited (0=unlimited) |
+| `max_rate_limit_wait_seconds` | `15` | Max wait time when rate limited (0=unlimited) |
 
 </details>
 

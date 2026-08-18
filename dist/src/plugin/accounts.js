@@ -167,7 +167,13 @@ function clearExpiredRateLimits(account) {
     for (const key of keys) {
         const resetTime = account.rateLimitResetTimes[key];
         if (resetTime !== undefined) {
-            if (now >= resetTime || hasAvailableQuotaForQuotaKey(account, key)) {
+            const isModelSpecific = key.includes(":");
+            const setTime = account.rateLimitSetTimes[key];
+            const maxAgeMs = 60_000;
+            const isExpiredByTime = now >= resetTime ||
+                (isModelSpecific && setTime !== undefined && now >= setTime + maxAgeMs) ||
+                (isModelSpecific && setTime === undefined && resetTime - now > maxAgeMs);
+            if (isExpiredByTime || hasAvailableQuotaForQuotaKey(account, key)) {
                 delete account.rateLimitResetTimes[key];
                 recordClearedQuotaKey(account, key, now);
             }
@@ -587,7 +593,8 @@ export class AccountManager {
     markRateLimited(account, retryAfterMs, family, headerStyle = "antigravity", model) {
         const now = nowMs();
         const key = getQuotaKey(family, headerStyle, model);
-        account.rateLimitResetTimes[key] = now + retryAfterMs;
+        const effectiveRetryAfterMs = key.includes(":") ? Math.min(retryAfterMs, 60_000) : retryAfterMs;
+        account.rateLimitResetTimes[key] = now + effectiveRetryAfterMs;
         // Record the mutation order and supersede any prior clear marker for this key.
         account.rateLimitSetTimes[key] = now;
         delete account.clearedQuotaKeys[key];
@@ -612,8 +619,11 @@ export class AccountManager {
         const failures = (account.consecutiveFailures ?? 0) + 1;
         account.consecutiveFailures = failures;
         account.lastFailureTime = now;
-        const backoffMs = calculateBackoffMs(reason, failures - 1, retryAfterMs);
+        let backoffMs = calculateBackoffMs(reason, failures - 1, retryAfterMs);
         const key = getQuotaKey(family, headerStyle, model);
+        if (key.includes(":")) {
+            backoffMs = Math.min(backoffMs, 60_000);
+        }
         account.rateLimitResetTimes[key] = now + backoffMs;
         // Record the mutation order and supersede any prior clear marker for this key.
         account.rateLimitSetTimes[key] = now;
