@@ -213,10 +213,16 @@ export function resolveAntigravityGemini36FlashBackendModel(
 }
 
 export function resolveAntigravityGemini37FlashBackendModel(
-  _model: string,
-  _thinkingLevel?: string,
+  model: string,
+  thinkingLevel?: string,
 ): string | undefined {
-  return undefined;
+  const modelWithoutQuota = model.replace(QUOTA_PREFIX_REGEX, "");
+  const match = modelWithoutQuota.match(GEMINI_37_FLASH_REGEX);
+  if (!match) {
+    return undefined;
+  }
+  const level = (thinkingLevel ?? match[1] ?? "medium").toLowerCase() as keyof typeof GEMINI_37_FLASH_MODELS;
+  return GEMINI_37_FLASH_MODELS[level] ?? GEMINI_37_FLASH_MODELS.medium;
 }
 
 export function getDefaultGemini3ThinkingLevel(model: string): string {

@@ -171,8 +171,14 @@ export function resolveAntigravityGemini36FlashBackendModel(model, thinkingLevel
     const level = (thinkingLevel ?? match[1] ?? "medium").toLowerCase();
     return GEMINI_36_FLASH_MODELS[level] ?? GEMINI_36_FLASH_MODELS.medium;
 }
-export function resolveAntigravityGemini37FlashBackendModel(_model, _thinkingLevel) {
-    return undefined;
+export function resolveAntigravityGemini37FlashBackendModel(model, thinkingLevel) {
+    const modelWithoutQuota = model.replace(QUOTA_PREFIX_REGEX, "");
+    const match = modelWithoutQuota.match(GEMINI_37_FLASH_REGEX);
+    if (!match) {
+        return undefined;
+    }
+    const level = (thinkingLevel ?? match[1] ?? "medium").toLowerCase();
+    return GEMINI_37_FLASH_MODELS[level] ?? GEMINI_37_FLASH_MODELS.medium;
 }
 export function getDefaultGemini3ThinkingLevel(model) {
     const normalized = model.toLowerCase().replace(QUOTA_PREFIX_REGEX, "");
