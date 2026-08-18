@@ -84,14 +84,6 @@ const GEMINI_36_FLASH_MODELS = {
   medium: "gemini-3.6-flash-medium",
   high: "gemini-3.6-flash-high",
 } as const;
-const GEMINI_37_FLASH_REGEX =
-  /^gemini-3\.7-flash(?:-(minimal|low|medium|high))?$/i;
-const GEMINI_37_FLASH_MODELS = {
-  minimal: "gemini-3.7-flash-low",
-  low: "gemini-3.7-flash-low",
-  medium: "gemini-3.7-flash-medium",
-  high: "gemini-3.7-flash-high",
-} as const;
 const GEMINI_PUBLIC_ONLY_REGEX =
   /^(?:gemini-3\.5-flash-lite(?:-(?:minimal|low|medium|high))?|gemini-flash-lite-latest)$/i;
 /**
@@ -213,16 +205,10 @@ export function resolveAntigravityGemini36FlashBackendModel(
 }
 
 export function resolveAntigravityGemini37FlashBackendModel(
-  model: string,
-  thinkingLevel?: string,
+  _model: string,
+  _thinkingLevel?: string,
 ): string | undefined {
-  const modelWithoutQuota = model.replace(QUOTA_PREFIX_REGEX, "");
-  const match = modelWithoutQuota.match(GEMINI_37_FLASH_REGEX);
-  if (!match) {
-    return undefined;
-  }
-  const level = (thinkingLevel ?? match[1] ?? "medium").toLowerCase() as keyof typeof GEMINI_37_FLASH_MODELS;
-  return GEMINI_37_FLASH_MODELS[level] ?? GEMINI_37_FLASH_MODELS.medium;
+  return undefined;
 }
 
 export function getDefaultGemini3ThinkingLevel(model: string): string {
