@@ -73,6 +73,8 @@ export interface ManagedAccount {
     verificationRequiredReason?: string;
     verificationUrl?: string;
 }
+export declare function getQuotaGroupForQuotaKey(key: QuotaKey): QuotaGroup;
+export declare function hasAvailableQuotaForQuotaKey(account: ManagedAccount, key: QuotaKey): boolean;
 /**
  * Resolve the quota group for soft quota checks.
  *

@@ -208,7 +208,32 @@ function getQuotaKey(family: ModelFamily, headerStyle: HeaderStyle, model?: stri
   return base;
 }
 
+export function getQuotaGroupForQuotaKey(key: QuotaKey): QuotaGroup {
+  if (key === "claude") {
+    return "claude";
+  }
+  const colonIndex = key.indexOf(":");
+  if (colonIndex !== -1) {
+    const model = key.substring(colonIndex + 1);
+    return getModelFamily(model);
+  }
+  return "gemini-pro";
+}
+
+export function hasAvailableQuotaForQuotaKey(account: ManagedAccount, key: QuotaKey): boolean {
+  if (!account.cachedQuota) {
+    return false;
+  }
+  const group = getQuotaGroupForQuotaKey(key);
+  const groupData = account.cachedQuota[group];
+  if (groupData?.remainingFraction == null) {
+    return false;
+  }
+  return groupData.remainingFraction > 0.1;
+}
+
 function isRateLimitedForQuotaKey(account: ManagedAccount, key: QuotaKey): boolean {
+  clearExpiredRateLimits(account);
   const resetTime = account.rateLimitResetTimes[key];
   return resetTime !== undefined && nowMs() < resetTime;
 }
@@ -249,9 +274,11 @@ function clearExpiredRateLimits(account: ManagedAccount): void {
   const keys = Object.keys(account.rateLimitResetTimes) as QuotaKey[];
   for (const key of keys) {
     const resetTime = account.rateLimitResetTimes[key];
-    if (resetTime !== undefined && now >= resetTime) {
-      delete account.rateLimitResetTimes[key];
-      recordClearedQuotaKey(account, key, now);
+    if (resetTime !== undefined) {
+      if (now >= resetTime || hasAvailableQuotaForQuotaKey(account, key)) {
+        delete account.rateLimitResetTimes[key];
+        recordClearedQuotaKey(account, key, now);
+      }
     }
   }
 }

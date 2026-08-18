@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AccountManager, type ModelFamily, parseRateLimitReason, calculateBackoffMs, resolveQuotaGroup, RATE_LIMIT_CLEAR_TTL_MS } from "./accounts";
+import { AccountManager, type ModelFamily, parseRateLimitReason, calculateBackoffMs, resolveQuotaGroup, RATE_LIMIT_CLEAR_TTL_MS, hasAvailableQuotaForQuotaKey, getQuotaGroupForQuotaKey } from "./accounts";
 import type { AccountStorageV4 } from "./storage";
 import type { OAuthAuthDetails } from "./types";
 import * as storageModule from "./storage";
@@ -1457,6 +1457,102 @@ describe("AccountManager", () => {
         expect(accounts[1]!.rateLimitResetTimes["gemini-antigravity"]).toBeUndefined();
         expect(accounts[0]!.consecutiveFailures).toBe(0);
         expect(accounts[1]!.consecutiveFailures).toBe(0);
+
+        vi.useRealTimers();
+      });
+    });
+
+    describe("Quota-aware rate limit self-healing", () => {
+      it("resolves quota groups for quota keys correctly", () => {
+        expect(getQuotaGroupForQuotaKey("claude")).toBe("claude");
+        expect(getQuotaGroupForQuotaKey("gemini-antigravity:gemini-3.7-flash")).toBe("gemini-flash");
+        expect(getQuotaGroupForQuotaKey("gemini-cli:gemini-3-pro")).toBe("gemini-pro");
+        expect(getQuotaGroupForQuotaKey("gemini-antigravity")).toBe("gemini-pro");
+      });
+
+      it("clears rate limit when cachedQuota shows >10% quota remaining", () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(10_000);
+
+        const stored: AccountStorageV4 = {
+          version: 4,
+          accounts: [
+            {
+              refreshToken: "r1",
+              projectId: "p1",
+              addedAt: 1,
+              lastUsed: 0,
+              rateLimitResetTimes: { "gemini-antigravity:gemini-3.7-flash": 100_000 },
+              cachedQuota: {
+                "gemini-flash": { remainingFraction: 0.85, modelCount: 1 },
+              },
+            },
+          ],
+          activeIndex: 0,
+        };
+
+        const manager = new AccountManager(undefined, stored);
+        const account = manager.getAccounts()[0]!;
+
+        expect(manager.isRateLimitedForHeaderStyle(account, "gemini", "antigravity", "gemini-3.7-flash")).toBe(false);
+        expect(account.rateLimitResetTimes["gemini-antigravity:gemini-3.7-flash"]).toBeUndefined();
+
+        vi.useRealTimers();
+      });
+
+      it("retains rate limit when cachedQuota shows <=10% quota remaining", () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(10_000);
+
+        const stored: AccountStorageV4 = {
+          version: 4,
+          accounts: [
+            {
+              refreshToken: "r1",
+              projectId: "p1",
+              addedAt: 1,
+              lastUsed: 0,
+              rateLimitResetTimes: { "claude": 100_000 },
+              cachedQuota: {
+                "claude": { remainingFraction: 0.05, modelCount: 1 },
+              },
+            },
+          ],
+          activeIndex: 0,
+        };
+
+        const manager = new AccountManager(undefined, stored);
+        const account = manager.getAccounts()[0]!;
+
+        expect(manager.isRateLimitedForHeaderStyle(account, "claude", "antigravity")).toBe(true);
+        expect(account.rateLimitResetTimes["claude"]).toBe(100_000);
+
+        vi.useRealTimers();
+      });
+
+      it("retains rate limit when cachedQuota is not available", () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(10_000);
+
+        const stored: AccountStorageV4 = {
+          version: 4,
+          accounts: [
+            {
+              refreshToken: "r1",
+              projectId: "p1",
+              addedAt: 1,
+              lastUsed: 0,
+              rateLimitResetTimes: { "claude": 100_000 },
+            },
+          ],
+          activeIndex: 0,
+        };
+
+        const manager = new AccountManager(undefined, stored);
+        const account = manager.getAccounts()[0]!;
+
+        expect(hasAvailableQuotaForQuotaKey(account, "claude")).toBe(false);
+        expect(manager.isRateLimitedForHeaderStyle(account, "claude", "antigravity")).toBe(true);
 
         vi.useRealTimers();
       });
