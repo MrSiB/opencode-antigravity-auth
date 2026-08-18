@@ -3,7 +3,7 @@
 # Tests fix for "Invalid `signature` in `thinking` block" error
 #
 # Models tested:
-# 1. Gemini (google/antigravity-gemini-3-pro-low, gemini-3-flash)
+# 1. Gemini (google/antigravity-gemini-3-pro-low, gemini-3-flash, google/antigravity-gemini-3.7-flash)
 # 2. Claude via Anthropic (anthropic/claude-opus-4-5)
 # 3. Claude via Google (google/antigravity-claude-*-thinking-*)
 # 4. OpenAI (openai/gpt-5.2-medium)
@@ -20,9 +20,9 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-log_pass() { echo -e "${GREEN}✓ PASS${NC}: $1"; ((PASS++)); }
-log_fail() { echo -e "${RED}✗ FAIL${NC}: $1"; ((FAIL++)); }
-log_skip() { echo -e "${YELLOW}○ SKIP${NC}: $1"; ((SKIP++)); }
+log_pass() { echo -e "${GREEN}✓ PASS${NC}: $1"; PASS=$((PASS + 1)); }
+log_fail() { echo -e "${RED}✗ FAIL${NC}: $1"; FAIL=$((FAIL + 1)); }
+log_skip() { echo -e "${YELLOW}○ SKIP${NC}: $1"; SKIP=$((SKIP + 1)); }
 log_info() { echo -e "  ${BLUE}→${NC} $1"; }
 
 get_session_id() {
@@ -202,8 +202,8 @@ else
     check_signature_error /tmp/e2e-t6-s4.log && CHAIN_OK=false
   fi
   
-  log_info "Turn 5: Gemini Flash..."
-  opencode run -s "$SID" -m google/antigravity-gemini-3-flash \
+  log_info "Turn 5: Gemini 3.7 Flash..."
+  opencode run -s "$SID" -m google/antigravity-gemini-3.7-flash \
     "Run: echo 'Turn5-Complete'" > /tmp/e2e-t6-s5.log 2>&1 || true
   check_signature_error /tmp/e2e-t6-s5.log && CHAIN_OK=false
   

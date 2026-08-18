@@ -221,8 +221,8 @@ export function resolveAntigravityGemini37FlashBackendModel(
   if (!match) {
     return undefined;
   }
-  const level = (thinkingLevel ?? match[1] ?? "medium").toLowerCase() as keyof typeof GEMINI_36_FLASH_MODELS;
-  return GEMINI_36_FLASH_MODELS[level] ?? GEMINI_36_FLASH_MODELS.medium;
+  const level = (thinkingLevel ?? match[1] ?? "medium").toLowerCase() as keyof typeof GEMINI_37_FLASH_MODELS;
+  return GEMINI_37_FLASH_MODELS[level] ?? GEMINI_37_FLASH_MODELS.medium;
 }
 
 export function getDefaultGemini3ThinkingLevel(model: string): string {

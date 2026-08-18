@@ -178,7 +178,7 @@ export function resolveAntigravityGemini37FlashBackendModel(model, thinkingLevel
         return undefined;
     }
     const level = (thinkingLevel ?? match[1] ?? "medium").toLowerCase();
-    return GEMINI_36_FLASH_MODELS[level] ?? GEMINI_36_FLASH_MODELS.medium;
+    return GEMINI_37_FLASH_MODELS[level] ?? GEMINI_37_FLASH_MODELS.medium;
 }
 export function getDefaultGemini3ThinkingLevel(model) {
     const normalized = model.toLowerCase().replace(QUOTA_PREFIX_REGEX, "");
