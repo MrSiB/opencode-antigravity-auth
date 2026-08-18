@@ -53,20 +53,20 @@ describe("resolveModelWithTier", () => {
       expect(result.quotaPreference).toBe("antigravity");
     });
 
-    it("gemini-3.7-flash models resolve to bare model id gemini-3.7-flash", () => {
+    it("gemini-3.7-flash models resolve to backend model ids in GEMINI_37_FLASH_MODELS", () => {
       const flash = resolveModelWithTier("antigravity-gemini-3.7-flash");
-      expect(flash.actualModel).toBe("gemini-3.7-flash");
+      expect(flash.actualModel).toBe("gemini-3.7-flash-tiered");
       expect(flash.thinkingLevel).toBe("medium");
       expect(flash.quotaPreference).toBe("antigravity");
 
       const flashHigh = resolveModelWithTier("antigravity-gemini-3.7-flash-high");
-      expect(flashHigh.actualModel).toBe("gemini-3.7-flash");
+      expect(flashHigh.actualModel).toBe("gemini-3.7-flash-tiered");
       expect(flashHigh.thinkingLevel).toBe("high");
       expect(flashHigh.quotaPreference).toBe("antigravity");
 
       const flashMinimal = resolveModelWithTier("antigravity-gemini-3.7-flash-minimal");
-      expect(flashMinimal.actualModel).toBe("gemini-3.7-flash");
-      expect(flashMinimal.thinkingLevel).toBe("minimal");
+      expect(flashMinimal.actualModel).toBe("gemini-3.7-flash-tiered");
+      expect(flashMinimal.thinkingLevel).toBe("low");
       expect(flashMinimal.quotaPreference).toBe("antigravity");
     });
 
@@ -286,10 +286,10 @@ describe("resolveModelWithTier", () => {
       ["antigravity-gemini-3.6-flash-low", "gemini-3.6-flash-low", "low"],
       ["antigravity-gemini-3.6-flash-medium", "gemini-3.6-flash-medium", "medium"],
       ["antigravity-gemini-3.6-flash-high", "gemini-3.6-flash-high", "high"],
-      ["antigravity-gemini-3.7-flash", "gemini-3.7-flash", "medium"],
-      ["antigravity-gemini-3.7-flash-low", "gemini-3.7-flash", "low"],
-      ["antigravity-gemini-3.7-flash-medium", "gemini-3.7-flash", "medium"],
-      ["antigravity-gemini-3.7-flash-high", "gemini-3.7-flash", "high"],
+      ["antigravity-gemini-3.7-flash", "gemini-3.7-flash-tiered", "medium"],
+      ["antigravity-gemini-3.7-flash-low", "gemini-3.7-flash-tiered", "low"],
+      ["antigravity-gemini-3.7-flash-medium", "gemini-3.7-flash-tiered", "medium"],
+      ["antigravity-gemini-3.7-flash-high", "gemini-3.7-flash-tiered", "high"],
     ])("maps %s to the Antigravity backend id %s", (requested, actual, thinkingLevel) => {
       const result = resolveModelWithTier(requested);
       expect(result.actualModel).toBe(actual);
