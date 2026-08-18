@@ -44,6 +44,17 @@ const UNSUPPORTED_SCHEMA_FIELDS = new Set([
     "propertyNames",
     "minContains",
     "maxContains",
+    "default",
+    "title",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
+    "examples",
+    "minLength",
+    "maxLength",
+    "pattern",
+    "minItems",
+    "maxItems",
+    "format",
 ]);
 function isNullSchema(schema) {
     if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
@@ -165,10 +176,6 @@ export function toGeminiSchema(schema) {
             // Keep enum values as-is
             result[key] = value;
         }
-        else if (key === "default" || key === "examples") {
-            // Keep default and examples as-is
-            result[key] = value;
-        }
         else if (key === "required" && Array.isArray(value)) {
             // Filter required array to only include properties that exist
             // This fixes: "parameters.required[X]: property is not defined"
@@ -208,7 +215,7 @@ export function isGeminiModel(model) {
 export function isGemini3Model(model) {
     return model.toLowerCase().includes("gemini-3");
 }
-const STRICT_SAMPLING_MODEL_REGEX = /^gemini-(?:3\.[67]-flash(?:-(?:low|medium|high|tiered))?|3\.5-flash-lite)$/i;
+const STRICT_SAMPLING_MODEL_REGEX = /^gemini-(?:3\.[67]-flash(?:-(?:minimal|low|medium|high|tiered))?|3\.5-flash-lite)$/i;
 const DEPRECATED_SAMPLING_FIELDS = [
     "temperature",
     "topP",
@@ -541,10 +548,11 @@ export function wrapToolsAsFunctionDeclarations(payload) {
             tool.parameters ||
             tool.input_schema ||
             tool.inputSchema || { type: "OBJECT", properties: {} });
+        const parameters = toGeminiSchema(schema);
         functionDeclarations.push({
             name,
             description,
-            parameters: schema,
+            parameters,
         });
     }
     const finalTools = [];

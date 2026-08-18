@@ -128,6 +128,7 @@ export const OPENCODE_MODEL_DEFINITIONS = {
         limit: { context: 1048576, output: 65536 },
         modalities: DEFAULT_MODALITIES,
         variants: {
+            minimal: { thinkingLevel: "minimal" },
             low: { thinkingLevel: "low" },
             medium: { thinkingLevel: "medium" },
             high: { thinkingLevel: "high" },
