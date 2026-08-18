@@ -137,11 +137,10 @@ export function getRandomizedHeaders(style: HeaderStyle, model?: string): Header
     };
   }
   const platform = randomFrom(ANTIGRAVITY_PLATFORMS);
-  const metadataPlatform = platform.startsWith("windows") ? "WINDOWS" : "MACOS";
   return {
     "User-Agent": `antigravity/${getAntigravityVersion()} ${platform}`,
     "X-Goog-Api-Client": randomFrom(ANTIGRAVITY_API_CLIENTS),
-    "Client-Metadata": `{"ideType":"ANTIGRAVITY","platform":"${metadataPlatform}","pluginType":"GEMINI"}`,
+    "Client-Metadata": `{"ideType":"ANTIGRAVITY","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`,
   };
 }
 

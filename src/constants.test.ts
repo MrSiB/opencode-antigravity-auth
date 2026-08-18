@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import {
   GEMINI_CLI_HEADERS,
+  getAntigravityHeaders,
   getRandomizedHeaders,
   type HeaderSet,
 } from "./constants.ts"
@@ -12,6 +13,15 @@ describe("GEMINI_CLI_HEADERS", () => {
       "X-Goog-Api-Client": "gl-node/22.17.0",
       "Client-Metadata": '{"ideType":"ANTIGRAVITY","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}',
     })
+  })
+})
+
+describe("getAntigravityHeaders", () => {
+  it("returns Client-Metadata with PLATFORM_UNSPECIFIED platform and ANTIGRAVITY ideType", () => {
+    const headers = getAntigravityHeaders()
+    const metadata = JSON.parse(headers["Client-Metadata"])
+    expect(metadata.platform).toBe("PLATFORM_UNSPECIFIED")
+    expect(metadata.ideType).toBe("ANTIGRAVITY")
   })
 })
 
@@ -45,16 +55,12 @@ describe("getRandomizedHeaders", () => {
       expect(headers["User-Agent"]).toMatch(/^antigravity\//)
     })
 
-    it("aligns Client-Metadata platform with User-Agent platform", () => {
+    it("sets Client-Metadata platform to PLATFORM_UNSPECIFIED and ideType to ANTIGRAVITY", () => {
       for (let i = 0; i < 50; i++) {
         const headers = getRandomizedHeaders("antigravity")
-        const ua = headers["User-Agent"]!
         const metadata = JSON.parse(headers["Client-Metadata"]!)
-        if (ua.includes("windows/")) {
-          expect(metadata.platform).toBe("WINDOWS")
-        } else {
-          expect(metadata.platform).toBe("MACOS")
-        }
+        expect(metadata.platform).toBe("PLATFORM_UNSPECIFIED")
+        expect(metadata.ideType).toBe("ANTIGRAVITY")
       }
     })
 
