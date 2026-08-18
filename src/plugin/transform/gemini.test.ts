@@ -68,6 +68,10 @@ describe("transform/gemini", () => {
       "gemini-3.6-flash-medium",
       "antigravity-gemini-3.6-flash-high",
       "gemini-3.5-flash-lite",
+      "gemini-3.7-flash",
+      "gemini-3.7-flash-medium",
+      "gemini-3.7-flash-minimal",
+      "antigravity-gemini-3.7-flash",
     ])("removes deprecated sampling fields for %s", (model) => {
       const payload: RequestPayload = {
         generationConfig: {
@@ -1068,13 +1072,13 @@ describe("transform/gemini", () => {
       expect(result.description).toBe("User's full name");
     });
 
-    it("preserves default value", () => {
+    it("removes default field", () => {
       const schema = {
         type: "number",
         default: 42,
       };
       const result = toGeminiSchema(schema) as Record<string, unknown>;
-      expect(result.default).toBe(42);
+      expect(result).not.toHaveProperty("default");
     });
 
     it("handles complex real-world MCP schema", () => {
@@ -1779,6 +1783,207 @@ describe("transform/gemini", () => {
       expect(tools).toHaveLength(2);
       expect(tools[0]).toHaveProperty("functionDeclarations");
       expect(tools[1]).toHaveProperty("googleSearch");
+    });
+  });
+
+  describe("Gemini 3.7 tool parameters sanitization and functionDeclaration wrapping", () => {
+    it("completely removes all forbidden schema fields from tool parameters", () => {
+      const complexSchema = {
+        $schema: "http://json-schema.org/draft-07/schema#",
+        $defs: { StringRef: { type: "string" } },
+        $ref: "#/$defs/StringRef",
+        definitions: { DefItem: { type: "number" } },
+        title: "Complex Tool Input",
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          query: {
+            type: "string",
+            title: "Search Query",
+            default: "select *",
+            minLength: 1,
+          },
+          limit: {
+            type: "integer",
+            title: "Result Limit",
+            default: 10,
+            exclusiveMinimum: 0,
+            exclusiveMaximum: 100,
+          },
+        },
+        required: ["query"],
+      };
+
+      const result = toGeminiSchema(complexSchema) as Record<string, unknown>;
+
+      const forbiddenFields = [
+        "$schema",
+        "$defs",
+        "$ref",
+        "definitions",
+        "additionalProperties",
+        "default",
+        "title",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+      ];
+
+      for (const field of forbiddenFields) {
+        expect(result).not.toHaveProperty(field);
+      }
+
+      expect(result.type).toBe("OBJECT");
+      expect(result.required).toEqual(["query"]);
+
+      const props = result.properties as Record<string, Record<string, unknown>>;
+      expect(props["query"]!.type).toBe("STRING");
+      for (const field of forbiddenFields) {
+        expect(props["query"]).not.toHaveProperty(field);
+      }
+
+      expect(props["limit"]!.type).toBe("INTEGER");
+      for (const field of forbiddenFields) {
+        expect(props["limit"]).not.toHaveProperty(field);
+      }
+    });
+
+    it("wraps tools into functionDeclarations format without root-level parameters", () => {
+      const payload: RequestPayload = {
+        contents: [],
+        tools: [
+          {
+            name: "execute_query",
+            description: "Run SQL query",
+            parameters: {
+              $schema: "http://json-schema.org/draft-07/schema#",
+              title: "QueryParam",
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                sql: { type: "string", default: "SELECT 1" },
+              },
+            },
+          },
+        ],
+      };
+
+      wrapToolsAsFunctionDeclarations(payload);
+
+      const tools = payload.tools as Array<Record<string, unknown>>;
+      expect(tools).toHaveLength(1);
+
+      expect(tools[0]).toHaveProperty("functionDeclarations");
+      expect(tools[0]).not.toHaveProperty("parameters");
+      expect(tools[0]).not.toHaveProperty("name");
+      expect(tools[0]).not.toHaveProperty("description");
+
+      const decls = tools[0]!.functionDeclarations as Array<Record<string, unknown>>;
+      expect(decls).toHaveLength(1);
+      expect(decls[0]!.name).toBe("execute_query");
+      expect(decls[0]!.description).toBe("Run SQL query");
+
+      const params = decls[0]!.parameters as Record<string, unknown>;
+      expect(params.type).toBe("OBJECT");
+      expect(params).not.toHaveProperty("$schema");
+      expect(params).not.toHaveProperty("title");
+      expect(params).not.toHaveProperty("additionalProperties");
+
+      const props = params.properties as Record<string, Record<string, unknown>>;
+      expect(props["sql"]!.type).toBe("STRING");
+      expect(props["sql"]).not.toHaveProperty("default");
+    });
+
+    it("handles Gemini 3.7 payload with complex tool parameters end-to-end", () => {
+      const payload: RequestPayload = {
+        contents: [{ role: "user", parts: [{ text: "Hello" }] }],
+        generationConfig: {
+          temperature: 0.7,
+          topP: 0.95,
+          candidateCount: 1,
+        },
+        tools: [
+          {
+            function: {
+              name: "search_code",
+              description: "Search in codebase",
+              input_schema: {
+                $schema: "http://json-schema.org/draft-07/schema#",
+                $defs: { Helper: { type: "string" } },
+                $ref: "#/$defs/Helper",
+                definitions: { Helper2: { type: "string" } },
+                title: "CodeSearchInput",
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  pattern: {
+                    type: "string",
+                    title: "Regex Pattern",
+                    default: ".*",
+                  },
+                  max_results: {
+                    type: "integer",
+                    title: "Max Results",
+                    default: 50,
+                    exclusiveMinimum: 1,
+                    exclusiveMaximum: 1000,
+                  },
+                },
+                required: ["pattern"],
+              },
+            },
+          },
+        ],
+      };
+
+      sanitizeGeminiGenerationConfigForModel(payload, "gemini-3.7-flash");
+      expect(payload.generationConfig).toEqual({});
+
+      const result = applyGeminiTransforms(payload, {
+        model: "gemini-3.7-flash",
+      });
+
+      expect(result.wrappedFunctionCount).toBe(1);
+
+      const tools = payload.tools as Array<Record<string, unknown>>;
+      expect(tools).toHaveLength(1);
+      expect(tools[0]).toHaveProperty("functionDeclarations");
+      expect(tools[0]).not.toHaveProperty("function");
+      expect(tools[0]).not.toHaveProperty("parameters");
+
+      const decls = tools[0]!.functionDeclarations as Array<Record<string, unknown>>;
+      expect(decls).toHaveLength(1);
+      expect(decls[0]!.name).toBe("search_code");
+      expect(decls[0]!.description).toBe("Search in codebase");
+
+      const params = decls[0]!.parameters as Record<string, unknown>;
+      expect(params.type).toBe("OBJECT");
+
+      const forbiddenFields = [
+        "$schema",
+        "$defs",
+        "$ref",
+        "definitions",
+        "additionalProperties",
+        "default",
+        "title",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+      ];
+
+      for (const field of forbiddenFields) {
+        expect(params).not.toHaveProperty(field);
+      }
+
+      const props = params.properties as Record<string, Record<string, unknown>>;
+      expect(props["pattern"]!.type).toBe("STRING");
+      expect(props["pattern"]).not.toHaveProperty("title");
+      expect(props["pattern"]).not.toHaveProperty("default");
+
+      expect(props["max_results"]!.type).toBe("INTEGER");
+      expect(props["max_results"]).not.toHaveProperty("title");
+      expect(props["max_results"]).not.toHaveProperty("default");
+      expect(props["max_results"]).not.toHaveProperty("exclusiveMinimum");
+      expect(props["max_results"]).not.toHaveProperty("exclusiveMaximum");
     });
   });
 });
