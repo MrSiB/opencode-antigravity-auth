@@ -27,6 +27,7 @@ describe("OPENCODE_MODEL_DEFINITIONS", () => {
       "antigravity-gemini-3.5-flash",
       "antigravity-gemini-3.6-flash",
       "antigravity-gemini-3.7-flash",
+      "antigravity-gemini-3.8-flash",
       "gemini-2.5-flash",
       "gemini-2.5-pro",
       "gemini-3-flash-preview",
@@ -37,6 +38,7 @@ describe("OPENCODE_MODEL_DEFINITIONS", () => {
       "gemini-3.5-flash-lite",
       "gemini-3.6-flash",
       "gemini-3.7-flash",
+      "gemini-3.8-flash",
     ]);
   });
 
@@ -78,6 +80,29 @@ describe("OPENCODE_MODEL_DEFINITIONS", () => {
       low: { thinkingLevel: "low" },
       medium: { thinkingLevel: "medium" },
       high: { thinkingLevel: "high" },
+    });
+
+    expect(getModel("antigravity-gemini-3.8-flash").variants).toEqual({
+      minimal: { thinkingLevel: "minimal" },
+      low: { thinkingLevel: "low" },
+      medium: { thinkingLevel: "medium" },
+      high: { thinkingLevel: "high" },
+    });
+    expect(getModel("antigravity-gemini-3.8-flash").temperature).toBe(false);
+    expect(getModel("antigravity-gemini-3.8-flash").limit).toEqual({
+      context: 1048576,
+      output: 65536,
+    });
+    expect(getModel("gemini-3.8-flash").temperature).toBe(false);
+    expect(getModel("gemini-3.8-flash").variants).toEqual({
+      minimal: { thinkingLevel: "minimal" },
+      low: { thinkingLevel: "low" },
+      medium: { thinkingLevel: "medium" },
+      high: { thinkingLevel: "high" },
+    });
+    expect(getModel("gemini-3.8-flash").limit).toEqual({
+      context: 1048576,
+      output: 65536,
     });
   });
 

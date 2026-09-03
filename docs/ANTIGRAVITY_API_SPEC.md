@@ -84,6 +84,7 @@ Accept: text/event-stream
 |------------|----------|------|--------|
 | Claude Sonnet 4.6 | `claude-sonnet-4-6` | Anthropic | ✅ Verified |
 | Claude Opus 4.6 Thinking | `claude-opus-4-6-thinking` | Anthropic | ✅ Verified |
+| Gemini 3.8 Flash | `gemini-3.8-flash-tiered` | Google | ✅ Verified (`thinkingLevel`: low, medium, high) |
 | Gemini 3.7 Flash | `gemini-3.7-flash-tiered` | Google | ✅ Verified (`thinkingLevel`: low, medium, high) |
 | Gemini 3.6 Flash High | `gemini-3.6-flash-high` | Google | ✅ Verified |
 | Gemini 3.6 Flash Medium | `gemini-3.6-flash-medium` | Google | ✅ Verified |

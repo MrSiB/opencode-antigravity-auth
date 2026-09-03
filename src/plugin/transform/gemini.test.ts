@@ -72,30 +72,51 @@ describe("transform/gemini", () => {
       "gemini-3.7-flash-medium",
       "gemini-3.7-flash-minimal",
       "antigravity-gemini-3.7-flash",
+      "gemini-3.8-flash",
+      "gemini-3.8-flash-medium",
+      "gemini-3.8-flash-minimal",
+      "gemini-3.8-flash-tiered",
+      "antigravity-gemini-3.8-flash",
     ])("removes deprecated sampling fields for %s", (model) => {
       const payload: RequestPayload = {
         generationConfig: {
           temperature: 0.7,
           topP: 0.9,
+          top_p: 0.8,
+          topK: 40,
           top_k: 40,
           candidateCount: 2,
+          candidate_count: 2,
           maxOutputTokens: 1024,
+          thinkingConfig: { thinkingLevel: "medium" },
         },
         extra_body: {
           generationConfig: {
+            temperature: 0.5,
+            topP: 0.9,
             top_p: 0.8,
+            topK: 20,
+            top_k: 40,
+            candidateCount: 2,
             candidate_count: 3,
             responseMimeType: "application/json",
+            thinkingConfig: { thinkingLevel: "low" },
           },
         },
       };
 
       sanitizeGeminiGenerationConfigForModel(payload, model);
 
-      expect(payload.generationConfig).toEqual({ maxOutputTokens: 1024 });
+      expect(payload.generationConfig).toEqual({
+        maxOutputTokens: 1024,
+        thinkingConfig: { thinkingLevel: "medium" },
+      });
       expect(
         (payload.extra_body as Record<string, unknown>).generationConfig,
-      ).toEqual({ responseMimeType: "application/json" });
+      ).toEqual({
+        responseMimeType: "application/json",
+        thinkingConfig: { thinkingLevel: "low" },
+      });
     });
 
     it("preserves sampling fields for older Gemini models", () => {

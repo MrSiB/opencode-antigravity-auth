@@ -215,7 +215,7 @@ export function isGeminiModel(model) {
 export function isGemini3Model(model) {
     return model.toLowerCase().includes("gemini-3");
 }
-const STRICT_SAMPLING_MODEL_REGEX = /^gemini-(?:3\.[67]-flash(?:-(?:minimal|low|medium|high|tiered))?|3\.5-flash-lite)$/i;
+const STRICT_SAMPLING_MODEL_REGEX = /^gemini-(?:3\.[678]-flash(?:-(?:minimal|low|medium|high|tiered))?|3\.5-flash-lite)$/i;
 const DEPRECATED_SAMPLING_FIELDS = [
     "temperature",
     "topP",

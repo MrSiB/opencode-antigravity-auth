@@ -70,6 +70,28 @@ describe("resolveModelWithTier", () => {
       expect(flashMinimal.quotaPreference).toBe("antigravity");
     });
 
+    it("gemini-3.8-flash models resolve to backend model ids in GEMINI_38_FLASH_MODELS", () => {
+      const flash = resolveModelWithTier("antigravity-gemini-3.8-flash");
+      expect(flash.actualModel).toBe("gemini-3.8-flash-tiered");
+      expect(flash.thinkingLevel).toBe("medium");
+      expect(flash.quotaPreference).toBe("antigravity");
+
+      const flashHigh = resolveModelWithTier("antigravity-gemini-3.8-flash-high");
+      expect(flashHigh.actualModel).toBe("gemini-3.8-flash-tiered");
+      expect(flashHigh.thinkingLevel).toBe("high");
+      expect(flashHigh.quotaPreference).toBe("antigravity");
+
+      const flashLow = resolveModelWithTier("antigravity-gemini-3.8-flash-low");
+      expect(flashLow.actualModel).toBe("gemini-3.8-flash-tiered");
+      expect(flashLow.thinkingLevel).toBe("low");
+      expect(flashLow.quotaPreference).toBe("antigravity");
+
+      const flashMinimal = resolveModelWithTier("antigravity-gemini-3.8-flash-minimal");
+      expect(flashMinimal.actualModel).toBe("gemini-3.8-flash-tiered");
+      expect(flashMinimal.thinkingLevel).toBe("low");
+      expect(flashMinimal.quotaPreference).toBe("antigravity");
+    });
+
     it("gemini-flash-latest aliases to Gemini 3.6 Flash with default medium thinking", () => {
       const result = resolveModelWithTier("gemini-flash-latest");
       expect(result.actualModel).toBe("gemini-3.6-flash");
@@ -87,6 +109,13 @@ describe("resolveModelWithTier", () => {
     it("gemini-3.6-flash defaults to medium thinking", () => {
       const result = resolveModelWithTier("gemini-3.6-flash");
       expect(result.actualModel).toBe("gemini-3.6-flash");
+      expect(result.thinkingLevel).toBe("medium");
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+
+    it("gemini-3.8-flash defaults to medium thinking", () => {
+      const result = resolveModelWithTier("gemini-3.8-flash");
+      expect(result.actualModel).toBe("gemini-3.8-flash");
       expect(result.thinkingLevel).toBe("medium");
       expect(result.quotaPreference).toBe("antigravity");
     });
@@ -170,6 +199,15 @@ describe("resolveModelWithTier", () => {
         "agy-sdk",
       );
       expect(result.actualModel).toBe("gemini-3.7-flash");
+      expect(result.quotaPreference).toBe("agy-sdk");
+    });
+
+    it("resolves gemini-3.8-flash models for agy-sdk headerStyle", () => {
+      const result = resolveModelForHeaderStyle(
+        "antigravity-gemini-3.8-flash",
+        "agy-sdk",
+      );
+      expect(result.actualModel).toBe("gemini-3.8-flash");
       expect(result.quotaPreference).toBe("agy-sdk");
     });
   });
@@ -290,6 +328,10 @@ describe("resolveModelWithTier", () => {
       ["antigravity-gemini-3.7-flash-low", "gemini-3.7-flash-tiered", "low"],
       ["antigravity-gemini-3.7-flash-medium", "gemini-3.7-flash-tiered", "medium"],
       ["antigravity-gemini-3.7-flash-high", "gemini-3.7-flash-tiered", "high"],
+      ["antigravity-gemini-3.8-flash", "gemini-3.8-flash-tiered", "medium"],
+      ["antigravity-gemini-3.8-flash-low", "gemini-3.8-flash-tiered", "low"],
+      ["antigravity-gemini-3.8-flash-medium", "gemini-3.8-flash-tiered", "medium"],
+      ["antigravity-gemini-3.8-flash-high", "gemini-3.8-flash-tiered", "high"],
     ])("maps %s to the Antigravity backend id %s", (requested, actual, thinkingLevel) => {
       const result = resolveModelWithTier(requested);
       expect(result.actualModel).toBe(actual);
@@ -514,6 +556,15 @@ describe("Issue #103: resolveModelForHeaderStyle", () => {
       expect(result.thinkingLevel).toBe("medium");
       expect(result.quotaPreference).toBe("antigravity");
     });
+
+    it("transforms gemini-3.8-flash to the Antigravity tiered backend id", () => {
+      const result = resolveModelForHeaderStyle(
+        "antigravity-gemini-3.8-flash",
+        "antigravity",
+      );
+      expect(result.actualModel).toBe("gemini-3.8-flash-tiered");
+      expect(result.quotaPreference).toBe("antigravity");
+    });
   });
 
   describe("quota fallback from antigravity to gemini-cli", () => {
@@ -587,6 +638,8 @@ describe("Issue #103: resolveModelForHeaderStyle", () => {
     });
 
     it.each([
+      ["gemini-3.8-flash", "medium"],
+      ["gemini-3.7-flash", "medium"],
       ["gemini-3.6-flash", "medium"],
       ["gemini-3.5-flash-lite", "minimal"],
     ])("keeps %s bare for gemini-cli", (model, thinkingLevel) => {

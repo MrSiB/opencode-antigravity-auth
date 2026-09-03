@@ -60,6 +60,7 @@ export declare function resolveAntigravityGemini35FlashBackendModel(model: strin
  */
 export declare function resolveAntigravityGemini36FlashBackendModel(model: string, thinkingLevel?: string): string | undefined;
 export declare function resolveAntigravityGemini37FlashBackendModel(model: string, thinkingLevel?: string): string | undefined;
+export declare function resolveAntigravityGemini38FlashBackendModel(model: string, thinkingLevel?: string): string | undefined;
 export declare function getDefaultGemini3ThinkingLevel(model: string): string;
 /** Models released on the public Gemini API without a verified Antigravity route. */
 export declare function isGeminiPublicOnlyModel(model: string): boolean;

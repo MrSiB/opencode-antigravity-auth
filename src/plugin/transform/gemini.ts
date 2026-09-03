@@ -256,7 +256,7 @@ export function isGemini3Model(model: string): boolean {
 }
 
 const STRICT_SAMPLING_MODEL_REGEX =
-  /^gemini-(?:3\.[67]-flash(?:-(?:minimal|low|medium|high|tiered))?|3\.5-flash-lite)$/i;
+  /^gemini-(?:3\.[678]-flash(?:-(?:minimal|low|medium|high|tiered))?|3\.5-flash-lite)$/i;
 const DEPRECATED_SAMPLING_FIELDS = [
   "temperature",
   "topP",
