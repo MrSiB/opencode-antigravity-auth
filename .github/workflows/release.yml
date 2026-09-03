@@ -70,7 +70,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.determine.outputs.changed == 'true' && steps.determine.outputs.tag_exists == 'false'
-        run: npm install
+        run: npm ci --include=dev
 
       - name: Run Tests
         if: steps.determine.outputs.changed == 'true' && steps.determine.outputs.tag_exists == 'false'
@@ -82,9 +82,6 @@ jobs:
         run: |
           CURRENT_VERSION="${{ steps.determine.outputs.current_version }}"
           
-          git checkout main
-          git pull origin main
-          
           # Update version in README.md (looking for pattern opencode-antigravity-auth@x.y.z)
           sed -i "s/opencode-antigravity-auth@[0-9]\+\.[0-9]\+\.[0-9]\+/opencode-antigravity-auth@$CURRENT_VERSION/g" README.md
           
@@ -93,7 +90,7 @@ jobs:
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add README.md
             git commit -m "docs: update readme version to $CURRENT_VERSION [skip ci]"
-            git push origin main
+            git push origin HEAD:main
             echo "README updated"
           else
             echo "README already up to date"
