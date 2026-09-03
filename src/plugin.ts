@@ -1635,6 +1635,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
   const config = loadConfig(directory);
   initRuntimeConfig(config);
 
+  let pluginAccountManager: AccountManager | null = null;
+
   // Cached getAuth function for tool access
   let cachedGetAuth: GetAuth | null = null;
   
@@ -1895,14 +1897,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
         }
       }
        
-      // If OpenCode has no valid OAuth auth, clear any stale account storage
       if (!isOAuthAuth(auth)) {
         if (initialAgySdkCredentials.length === 0) {
-          try {
-            await clearAccounts();
-          } catch {
-            // ignore
-          }
           return {};
         }
 
@@ -1945,7 +1941,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
       // Note: AccountManager now ensures the current auth is always included in accounts
 
       const accountManager = await AccountManager.loadFromDisk(auth);
+      pluginAccountManager = accountManager;
       activeAccountManager = accountManager;
+      accountManager.registerExitHandlers();
       if (accountManager.getAccountCount() > 0) {
         accountManager.requestSaveToDisk();
       }
@@ -3037,7 +3035,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     const cooldownMs = 10 * 60 * 1000;
 
                     accountManager.markAccountVerificationRequired(account.index, verificationReason, extracted.verifyUrl);
-                    accountManager.markAccountCoolingDown(account, cooldownMs, "validation-required");
+                    if (!account.enabled) {
+                      accountManager.markAccountCoolingDown(account, cooldownMs, "validation-required");
+                    }
                     accountManager.markRateLimited(account, cooldownMs, family, headerStyle, model);
 
                     const label = account.email || `Account ${account.index + 1}`;
@@ -3049,7 +3049,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       accountManager.markToastShown(account.index);
                     }
 
-                    pushDebug(`verification-required: disabled account ${account.index}`);
+                    pushDebug(
+                      `verification-required: ${account.enabled ? `last-survivor kept enabled for account ${account.index}` : `disabled account ${account.index}`}`,
+                    );
                     getHealthTracker().recordFailure(account.index);
 
                     lastFailure = createFailureContext(response);
@@ -4224,6 +4226,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
         ],
       },
     ],
+  },
+  dispose: async () => {
+    await (pluginAccountManager ?? activeAccountManager)?.flushSaveToDisk();
   },
   };
 };

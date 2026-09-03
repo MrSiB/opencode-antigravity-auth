@@ -302,7 +302,7 @@ function aggregateGeminiCliQuota(response: RetrieveUserQuotaResponse): GeminiCli
   }
 
   // Sort by model ID for consistent display
-  models.sort((a, b) => a.modelId.localeCompare(b.modelId));
+  models.sort((a, b) => (a.modelId ?? "").localeCompare(b.modelId ?? ""));
 
   return { models };
 }
@@ -477,5 +477,6 @@ export async function checkAccountsQuota(
 
 export const __testExports = {
   aggregateQuota,
+  aggregateGeminiCliQuota,
   mapWithConcurrency,
-}
+};

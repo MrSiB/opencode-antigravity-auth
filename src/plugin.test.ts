@@ -165,6 +165,7 @@ describe("createAntigravityPlugin auth.loader disk OAuth promotion", () => {
     vi.mocked(storageModule.loadAccounts).mockReset();
     vi.mocked(storageModule.saveAccountsReplace).mockReset();
     vi.mocked(storageModule.removeAccountFromStorage).mockReset();
+    vi.mocked(storageModule.clearAccounts).mockReset();
   });
 
   it("routes through the OAuth path when OpenCode reports API-key auth but OAuth accounts exist on disk", async () => {
@@ -290,6 +291,43 @@ describe("createAntigravityPlugin auth.loader disk OAuth promotion", () => {
       const body = await response.text();
       expect(response.status).toBe(404);
       expect(body).toContain("API-key path forwarded the request");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("never calls clearAccounts when non-OAuth auth is provided and loadAccounts returns null", async () => {
+    // Given: OpenCode is in API-key mode with a dummy key and loadAccounts returns null
+    vi.mocked(storageModule.loadAccounts).mockResolvedValue(null);
+
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo) => {
+      const url = String(input);
+      if (url.includes("generativelanguage.googleapis.com")) {
+        return new Response(JSON.stringify({ models: [] }));
+      }
+      return new Response("1.2.3");
+    }));
+
+    try {
+      const plugin = await createAntigravityPlugin("google")({
+        client,
+        directory: process.cwd(),
+      });
+
+      // When: auth.loader is invoked
+      const loader = await plugin.auth.loader(
+        async () => ({ type: "api", key: "opencode-antigravity-auth" }),
+        {
+          id: "google",
+          api: "https://generativelanguage.googleapis.com/v1beta",
+          npm: "@ai-sdk/google",
+          models: {},
+        },
+      );
+
+      // Then: empty object is returned and clearAccounts was never called
+      expect(loader).toEqual({});
+      expect(storageModule.clearAccounts).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
     }

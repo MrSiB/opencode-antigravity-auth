@@ -5,6 +5,8 @@ import { generateFingerprint, updateFingerprintVersion, MAX_FINGERPRINT_HISTORY 
 import { getModelFamily } from "./transform/model-resolver.js";
 import { debugLogToFile } from "./debug.js";
 import { formatAccountLabel } from "./logging-utils.js";
+import { createLogger } from "./logger.js";
+const log = createLogger("accounts");
 const QUOTA_EXHAUSTED_BACKOFFS = [60_000, 300_000, 1_800_000, 7_200_000];
 const RATE_LIMIT_EXCEEDED_BACKOFF = 30_000;
 // Increased from 15s to 45s base + jitter to reduce retry pressure on capacity errors
@@ -347,9 +349,48 @@ export class AccountManager {
     /** Tracks an in-flight disk write so flushSaveToDisk can await a write that has
      * already started (savePending is cleared before the write settles). */
     activeSave = null;
+    static exitHandlersRegistered = false;
+    static activeInstances = new Set();
+    static unregisterExitHandlersFn = null;
+    static clearExitHandlersForTests() {
+        AccountManager.activeInstances.clear();
+    }
     static async loadFromDisk(authFallback) {
         const stored = await loadAccounts();
-        return new AccountManager(authFallback, stored);
+        const manager = new AccountManager(authFallback, stored);
+        manager.registerExitHandlers();
+        return manager;
+    }
+    registerExitHandlers() {
+        AccountManager.activeInstances.add(this);
+        if (!AccountManager.exitHandlersRegistered) {
+            AccountManager.exitHandlersRegistered = true;
+            const onExit = () => {
+                for (const instance of AccountManager.activeInstances) {
+                    instance.flushSaveToDisk().catch(() => { });
+                }
+            };
+            if (typeof process?.once === "function") {
+                process.once("SIGTERM", onExit);
+                process.once("SIGINT", onExit);
+                process.once("beforeExit", onExit);
+            }
+            AccountManager.unregisterExitHandlersFn = () => {
+                if (typeof process?.removeListener === "function") {
+                    process.removeListener("SIGTERM", onExit);
+                    process.removeListener("SIGINT", onExit);
+                    process.removeListener("beforeExit", onExit);
+                }
+                AccountManager.exitHandlersRegistered = false;
+                AccountManager.unregisterExitHandlersFn = null;
+            };
+        }
+        return () => {
+            AccountManager.activeInstances.delete(this);
+            if (AccountManager.unregisterExitHandlersFn && AccountManager.activeInstances.size === 0) {
+                AccountManager.unregisterExitHandlersFn();
+            }
+        };
     }
     constructor(authFallback, stored) {
         const authParts = authFallback ? parseRefreshParts(authFallback.refresh) : null;
@@ -399,6 +440,8 @@ export class AccountManager {
                     verificationRequiredAt: acc.verificationRequiredAt,
                     verificationRequiredReason: acc.verificationRequiredReason,
                     verificationUrl: acc.verificationUrl,
+                    tag: acc.tag,
+                    tags: acc.tags ? [...acc.tags] : undefined,
                 };
             })
                 .filter((a) => a !== null);
@@ -417,6 +460,26 @@ export class AccountManager {
                 const defaultIndex = this.cursor;
                 this.currentAccountIndexByFamily.claude = clampNonNegativeInt(stored.activeIndexByFamily?.claude, defaultIndex) % this.accounts.length;
                 this.currentAccountIndexByFamily.gemini = clampNonNegativeInt(stored.activeIndexByFamily?.gemini, defaultIndex) % this.accounts.length;
+            }
+            if (this.accounts.length > 0 && this.accounts.every((acc) => acc.enabled === false)) {
+                log.warn("Startup fail-safe recovery activated: all accounts were disabled. Auto-re-enabling all accounts.");
+                debugLogToFile("[Account] Startup fail-safe recovery activated: all accounts were disabled. Auto-re-enabling all accounts.");
+                const now = nowMs();
+                const STALE_VERIFICATION_THRESHOLD_MS = 30 * 60 * 1000;
+                for (const acc of this.accounts) {
+                    acc.enabled = true;
+                    if (acc.verificationRequired) {
+                        const isStale = !acc.verificationRequiredAt ||
+                            now - acc.verificationRequiredAt > STALE_VERIFICATION_THRESHOLD_MS;
+                        if (isStale) {
+                            acc.verificationRequired = false;
+                            acc.verificationRequiredAt = undefined;
+                            acc.verificationRequiredReason = undefined;
+                            acc.verificationUrl = undefined;
+                        }
+                    }
+                }
+                this.requestSaveToDisk();
             }
             // Persist updated fingerprint versions to disk
             if (fingerprintVersionChanged) {
@@ -788,7 +851,18 @@ export class AccountManager {
             account.verificationUrl = normalizedVerifyUrl;
         }
         if (account.enabled !== false) {
-            this.setAccountEnabled(accountIndex, false);
+            if (this.getEnabledAccounts().length <= 1) {
+                log.warn("Last survivor rule activated: preventing disabling of the last enabled account", {
+                    accountIndex,
+                    email: account.email,
+                });
+                debugLogToFile(`[Account] Last survivor rule activated: account ${accountIndex} (${account.email ?? ""}) remains enabled with cooldown`);
+                this.markAccountCoolingDown(account, 10 * 60 * 1000, "last-survivor-cooldown");
+                this.requestSaveToDisk();
+            }
+            else {
+                this.setAccountEnabled(accountIndex, false);
+            }
         }
         else {
             this.requestSaveToDisk();
@@ -1014,6 +1088,8 @@ export class AccountManager {
                 verificationRequiredAt: a.verificationRequiredAt,
                 verificationRequiredReason: a.verificationRequiredReason,
                 verificationUrl: a.verificationUrl,
+                tag: a.tag,
+                tags: a.tags?.length ? [...a.tags] : undefined,
             })),
             activeIndex: claudeIndex,
             activeIndexByFamily: {
@@ -1061,16 +1137,13 @@ export class AccountManager {
         }, 1000);
     }
     async flushSaveToDisk() {
-        // Drain until there is neither a pending (debounced) save waiting to fire nor
-        // an in-flight write. Re-check after every await: completing one save can leave
-        // a NEWER debounced save still pending (executeSave clears savePending before
-        // awaiting saveToDisk, so a fresh requestSaveToDisk can schedule another timer),
-        // and a write may still be in flight even when savePending is already false.
         while (this.savePending || this.activeSave) {
             if (this.savePending) {
-                await new Promise((resolve) => {
-                    this.savePromiseResolvers.push(resolve);
-                });
+                if (this.saveTimeout) {
+                    clearTimeout(this.saveTimeout);
+                    this.saveTimeout = null;
+                }
+                await this.executeSave();
             }
             else if (this.activeSave) {
                 await this.activeSave;
@@ -1196,6 +1269,8 @@ export class AccountManager {
             addedAt: a.addedAt,
             lastUsed: a.lastUsed,
             enabled: a.enabled,
+            tag: a.tag,
+            tags: a.tags ? [...a.tags] : undefined,
         }));
     }
     getOldestQuotaCacheAge() {

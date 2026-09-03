@@ -5,6 +5,9 @@ import {
   loadAccounts,
   removeAccountFromStorage,
   saveAccounts,
+  saveAccountsReplace,
+  hashRefreshToken,
+  DELETED_HASH_TTL_MS,
   type AccountMetadata,
   type AccountStorage,
   type AccountStorageV4,
@@ -288,8 +291,9 @@ vi.mock("node:fs", async () => {
       writeFile: vi.fn(),
       mkdir: vi.fn().mockResolvedValue(undefined),
       access: vi.fn().mockResolvedValue(undefined),
-      unlink: vi.fn(),
+      unlink: vi.fn().mockResolvedValue(undefined),
       rename: vi.fn().mockResolvedValue(undefined),
+      copyFile: vi.fn().mockResolvedValue(undefined),
       appendFile: vi.fn(),
     },
     existsSync: vi.fn(),
@@ -533,6 +537,63 @@ describe("Storage Migration", () => {
       expect(
         result?.accounts[result.activeIndexByFamily?.gemini ?? 0]?.email,
       ).toBe("b@example.com");
+    });
+
+    it("heals 100% disabled accounts to enabled: true and clears stale verification flags", async () => {
+      const now = Date.now();
+      vi.mocked(fs.readFile).mockResolvedValue(
+        JSON.stringify({
+          version: 4,
+          accounts: [
+            {
+              email: "stale@example.com",
+              refreshToken: "token-stale",
+              addedAt: 1,
+              lastUsed: 1,
+              enabled: false,
+              verificationRequired: true,
+              verificationRequiredAt: now - 45 * 60 * 1000,
+              verificationRequiredReason: "stale verification error",
+              verificationUrl: "https://accounts.google.com/stale",
+            },
+            {
+              email: "recent@example.com",
+              refreshToken: "token-recent",
+              addedAt: 2,
+              lastUsed: 2,
+              enabled: false,
+              verificationRequired: true,
+              verificationRequiredAt: now - 5 * 60 * 1000,
+              verificationRequiredReason: "recent verification error",
+              verificationUrl: "https://accounts.google.com/recent",
+            },
+            {
+              email: "disabled@example.com",
+              refreshToken: "token-disabled",
+              addedAt: 3,
+              lastUsed: 3,
+              enabled: false,
+            },
+          ],
+          activeIndex: 0,
+        }),
+      );
+
+      const result = await loadAccounts();
+
+      expect(result).not.toBeNull();
+      expect(result?.accounts).toHaveLength(3);
+      expect(result?.accounts.every((a) => a.enabled === true)).toBe(true);
+
+      const staleAcc = result?.accounts.find((a) => a.email === "stale@example.com");
+      expect(staleAcc?.verificationRequired).toBe(false);
+      expect(staleAcc?.verificationRequiredAt).toBeUndefined();
+      expect(staleAcc?.verificationRequiredReason).toBeUndefined();
+      expect(staleAcc?.verificationUrl).toBeUndefined();
+
+      const recentAcc = result?.accounts.find((a) => a.email === "recent@example.com");
+      expect(recentAcc?.verificationRequired).toBe(true);
+      expect(recentAcc?.verificationRequiredAt).toBe(now - 5 * 60 * 1000);
     });
 
     it("migrates V2 storage on load and persists V4", async () => {
@@ -1280,6 +1341,380 @@ describe("saveAccounts merge — cleared rate limits are not resurrected", () =>
       // the legacy incoming reset.
       expect(merged.accounts[0]?.rateLimitResetTimes?.claude).toBe(1000);
       expect(merged.accounts[0]?.rateLimitSetTimes?.claude).toBe(200);
+    });
+  });
+
+  describe("deletedRefreshTokenHashes TTL and un-blacklist", () => {
+    it("prunes entries older than 24h on loadAccounts and keeps active ones", async () => {
+      const now = Date.now();
+      const expiredHash = hashRefreshToken("expired-token");
+      const activeHash = hashRefreshToken("active-token");
+
+      vi.mocked(fs.readFile).mockImplementation((path) => {
+        if ((path as string).endsWith(".gitignore")) {
+          const error = new Error("ENOENT") as NodeJS.ErrnoException;
+          error.code = "ENOENT";
+          return Promise.reject(error);
+        }
+        return Promise.resolve(
+          JSON.stringify({
+            version: 4,
+            accounts: [
+              {
+                email: "expired@example.com",
+                refreshToken: "expired-token",
+                addedAt: 1,
+                lastUsed: 1,
+              },
+              {
+                email: "active@example.com",
+                refreshToken: "active-token",
+                addedAt: 2,
+                lastUsed: 2,
+              },
+              {
+                email: "valid@example.com",
+                refreshToken: "valid-token",
+                addedAt: 3,
+                lastUsed: 3,
+              },
+            ],
+            activeIndex: 0,
+            deletedRefreshTokenHashes: [
+              { hash: expiredHash, deletedAt: now - (DELETED_HASH_TTL_MS + 5000) },
+              { hash: activeHash, deletedAt: now - 1000 },
+            ],
+          }),
+        );
+      });
+
+      const result = await loadAccounts();
+      expect(result).not.toBeNull();
+      const tokens = result?.accounts.map((a) => a.refreshToken);
+      expect(tokens).toContain("expired-token");
+      expect(tokens).toContain("valid-token");
+      expect(tokens).not.toContain("active-token");
+
+      expect(result?.deletedRefreshTokenHashes).toEqual([
+        { hash: activeHash, deletedAt: now - 1000 },
+      ]);
+    });
+
+    it("prunes expired blacklist entries during saveAccounts merge", async () => {
+      const now = Date.now();
+      const expiredHash = hashRefreshToken("old-revoked");
+      const activeHash = hashRefreshToken("recent-revoked");
+
+      mockDisk({
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+        deletedRefreshTokenHashes: [
+          { hash: expiredHash, deletedAt: now - (DELETED_HASH_TTL_MS + 60000) },
+          { hash: activeHash, deletedAt: now - 10000 },
+        ],
+      });
+
+      await saveAccounts({
+        version: 4,
+        accounts: [
+          {
+            email: "user@example.com",
+            refreshToken: "user-token",
+            addedAt: now,
+            lastUsed: now,
+          },
+        ],
+        activeIndex: 0,
+      });
+
+      const merged = readMergedSnapshot();
+      expect(merged.deletedRefreshTokenHashes).toEqual([
+        { hash: activeHash, deletedAt: now - 10000 },
+      ]);
+    });
+
+    it("un-blacklists account when re-added and saved via saveAccounts", async () => {
+      const now = Date.now();
+      const restoreHash = hashRefreshToken("restored-token");
+
+      mockDisk({
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+        deletedRefreshTokenHashes: [
+          { hash: restoreHash, deletedAt: now - 5000 },
+        ],
+      });
+
+      await saveAccounts({
+        version: 4,
+        accounts: [
+          {
+            email: "restored@example.com",
+            refreshToken: "restored-token",
+            addedAt: now,
+            lastUsed: now,
+          },
+        ],
+        activeIndex: 0,
+      });
+
+      const merged = readMergedSnapshot();
+      expect(merged.accounts.map((a) => a.refreshToken)).toEqual(["restored-token"]);
+      expect(merged.deletedRefreshTokenHashes).toBeUndefined();
+    });
+
+    it("un-blacklists account on saveAccountsReplace", async () => {
+      const restoreHash = hashRefreshToken("replaced-token");
+
+      mockDisk({
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+        deletedRefreshTokenHashes: [
+          { hash: restoreHash, deletedAt: Date.now() - 5000 },
+        ],
+      });
+
+      await saveAccountsReplace({
+        version: 4,
+        accounts: [
+          {
+            email: "replaced@example.com",
+            refreshToken: "replaced-token",
+            addedAt: 10,
+            lastUsed: 10,
+          },
+        ],
+        activeIndex: 0,
+      });
+
+      const merged = readMergedSnapshot();
+      expect(merged.accounts.map((a) => a.refreshToken)).toEqual(["replaced-token"]);
+      expect(merged.deletedRefreshTokenHashes).toBeUndefined();
+    });
+  });
+
+  describe("writeAccountsAtomically EBUSY/EXDEV/EPERM fallback", () => {
+    it("falls back to copyFile + unlink when fs.rename throws EBUSY", async () => {
+      mockDisk({
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+      });
+
+      const ebusyError = new Error("EBUSY: resource busy or locked, rename") as NodeJS.ErrnoException;
+      ebusyError.code = "EBUSY";
+      vi.mocked(fs.rename).mockRejectedValueOnce(ebusyError);
+
+      await saveAccounts({
+        version: 4,
+        accounts: [
+          {
+            email: "docker@example.com",
+            refreshToken: "docker-token",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+        activeIndex: 0,
+      });
+
+      expect(fs.copyFile).toHaveBeenCalledTimes(1);
+      const copyArgs = vi.mocked(fs.copyFile).mock.calls[0];
+      expect(String(copyArgs?.[0])).toContain(".tmp");
+      expect(String(copyArgs?.[1])).toContain("antigravity-accounts.json");
+      expect(fs.unlink).toHaveBeenCalledWith(copyArgs?.[0]);
+    });
+
+    it("falls back to copyFile + unlink when fs.rename throws EXDEV", async () => {
+      mockDisk({
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+      });
+
+      const exdevError = new Error("EXDEV: cross-device link not permitted") as NodeJS.ErrnoException;
+      exdevError.code = "EXDEV";
+      vi.mocked(fs.rename).mockRejectedValueOnce(exdevError);
+
+      await saveAccounts({
+        version: 4,
+        accounts: [
+          {
+            email: "exdev@example.com",
+            refreshToken: "exdev-token",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+        activeIndex: 0,
+      });
+
+      expect(fs.copyFile).toHaveBeenCalledTimes(1);
+      expect(fs.unlink).toHaveBeenCalled();
+    });
+
+    it("falls back to copyFile + unlink when fs.rename throws EPERM", async () => {
+      mockDisk({
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+      });
+
+      const epermError = new Error("EPERM: operation not permitted") as NodeJS.ErrnoException;
+      epermError.code = "EPERM";
+      vi.mocked(fs.rename).mockRejectedValueOnce(epermError);
+
+      await saveAccounts({
+        version: 4,
+        accounts: [
+          {
+            email: "eperm@example.com",
+            refreshToken: "eperm-token",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+        activeIndex: 0,
+      });
+
+      expect(fs.copyFile).toHaveBeenCalledTimes(1);
+      expect(fs.unlink).toHaveBeenCalled();
+    });
+
+    it("rethrows non-fallback error from fs.rename and cleans up temp file", async () => {
+      mockDisk({
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+      });
+
+      const eaccesError = new Error("EACCES: permission denied") as NodeJS.ErrnoException;
+      eaccesError.code = "EACCES";
+      vi.mocked(fs.rename).mockRejectedValueOnce(eaccesError);
+
+      await expect(
+        saveAccounts({
+          version: 4,
+          accounts: [
+            {
+              email: "fail@example.com",
+              refreshToken: "fail-token",
+              addedAt: 1,
+              lastUsed: 1,
+            },
+          ],
+          activeIndex: 0,
+        }),
+      ).rejects.toThrow("EACCES");
+
+      expect(fs.copyFile).not.toHaveBeenCalled();
+      expect(fs.unlink).toHaveBeenCalled();
+    });
+  });
+
+  describe("tags and tag metadata preservation", () => {
+    it("preserves tag and tags across save and load cycles", async () => {
+      vi.mocked(fs.readFile).mockImplementation((path) => {
+        if ((path as string).endsWith(".gitignore")) {
+          const error = new Error("ENOENT") as NodeJS.ErrnoException;
+          error.code = "ENOENT";
+          return Promise.reject(error);
+        }
+        return Promise.resolve(
+          JSON.stringify({
+            version: 4,
+            accounts: [
+              {
+                email: "tagged@example.com",
+                refreshToken: "tagged-token",
+                addedAt: 1,
+                lastUsed: 1,
+                tag: "primary",
+                tags: ["work", "ai"],
+              },
+            ],
+            activeIndex: 0,
+          }),
+        );
+      });
+
+      const loaded = await loadAccounts();
+      expect(loaded).not.toBeNull();
+      expect(loaded?.accounts[0]?.tag).toBe("primary");
+      expect(loaded?.accounts[0]?.tags).toEqual(["work", "ai"]);
+    });
+
+    it("preserves existing tag and tags when incoming account update omits them", async () => {
+      mockDisk({
+        version: 4,
+        accounts: [
+          {
+            email: "worker@example.com",
+            refreshToken: "worker-token",
+            addedAt: 1,
+            lastUsed: 1,
+            tag: "existing-tag",
+            tags: ["alpha", "beta"],
+          },
+        ],
+        activeIndex: 0,
+      });
+
+      await saveAccounts({
+        version: 4,
+        accounts: [
+          {
+            email: "worker@example.com",
+            refreshToken: "worker-token",
+            addedAt: 1,
+            lastUsed: 2,
+          },
+        ],
+        activeIndex: 0,
+      });
+
+      const merged = readMergedSnapshot();
+      expect(merged.accounts[0]?.tag).toBe("existing-tag");
+      expect(merged.accounts[0]?.tags).toEqual(["alpha", "beta"]);
+    });
+
+    it("updates tag and tags when incoming account provides new values", async () => {
+      mockDisk({
+        version: 4,
+        accounts: [
+          {
+            email: "worker@example.com",
+            refreshToken: "worker-token",
+            addedAt: 1,
+            lastUsed: 1,
+            tag: "old-tag",
+            tags: ["old"],
+          },
+        ],
+        activeIndex: 0,
+      });
+
+      await saveAccounts({
+        version: 4,
+        accounts: [
+          {
+            email: "worker@example.com",
+            refreshToken: "worker-token",
+            addedAt: 1,
+            lastUsed: 2,
+            tag: "new-tag",
+            tags: ["new1", "new2"],
+          },
+        ],
+        activeIndex: 0,
+      });
+
+      const merged = readMergedSnapshot();
+      expect(merged.accounts[0]?.tag).toBe("new-tag");
+      expect(merged.accounts[0]?.tags).toEqual(["new1", "new2"]);
     });
   });
 });

@@ -72,6 +72,8 @@ export interface ManagedAccount {
     verificationRequiredAt?: number;
     verificationRequiredReason?: string;
     verificationUrl?: string;
+    tag?: string;
+    tags?: string[];
 }
 export declare function getQuotaGroupForQuotaKey(key: QuotaKey): QuotaGroup;
 export declare function hasAvailableQuotaForQuotaKey(account: ManagedAccount, key: QuotaKey): boolean;
@@ -112,7 +114,12 @@ export declare class AccountManager {
     /** Tracks an in-flight disk write so flushSaveToDisk can await a write that has
      * already started (savePending is cleared before the write settles). */
     private activeSave;
+    private static exitHandlersRegistered;
+    private static activeInstances;
+    private static unregisterExitHandlersFn;
+    static clearExitHandlersForTests(): void;
     static loadFromDisk(authFallback?: OAuthAuthDetails): Promise<AccountManager>;
+    registerExitHandlers(): () => void;
     constructor(authFallback?: OAuthAuthDetails, stored?: AccountStorageV4 | null);
     getAccountCount(): number;
     getTotalAccountCount(): number;

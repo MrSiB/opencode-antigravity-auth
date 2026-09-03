@@ -79,92 +79,107 @@ export class AntigravityTokenRefreshError extends Error {
   }
 }
 
-/**
- * Refreshes an Antigravity OAuth access token, updates persisted credentials, and handles revocation.
- */
-export async function refreshAccessToken(
+const inFlightRefreshes = new Map<string, Promise<OAuthAuthDetails | undefined>>();
+
+export function clearInFlightRefreshes(): void {
+  inFlightRefreshes.clear();
+}
+
+export function refreshAccessToken(
   auth: OAuthAuthDetails,
-  client: PluginClient,
-  providerId: string,
+  _client: PluginClient,
+  _providerId: string,
 ): Promise<OAuthAuthDetails | undefined> {
   const parts = parseRefreshParts(auth.refresh);
   if (!parts.refreshToken) {
-    return undefined;
+    return Promise.resolve(undefined);
   }
 
-  try {
-    const startTime = Date.now();
-    const response = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: parts.refreshToken,
-        client_id: ANTIGRAVITY_CLIENT_ID,
-        client_secret: ANTIGRAVITY_CLIENT_SECRET,
-      }),
-    });
+  const inFlight = inFlightRefreshes.get(parts.refreshToken);
+  if (inFlight) {
+    return inFlight;
+  }
 
-    if (!response.ok) {
-      let errorText: string | undefined;
-      try {
-        errorText = await response.text();
-      } catch {
-        errorText = undefined;
-      }
-
-      const { code, description } = parseOAuthErrorPayload(errorText);
-      const details = [code, description ?? errorText].filter(Boolean).join(": ");
-      const baseMessage = `Antigravity token refresh failed (${response.status} ${response.statusText})`;
-      const message = details ? `${baseMessage} - ${details}` : baseMessage;
-      log.warn("Token refresh failed", { status: response.status, code, details });
-
-      if (code === "invalid_grant") {
-        log.warn("Google revoked the stored refresh token - reauthentication required");
-        invalidateProjectContextCache(auth.refresh);
-        clearCachedAuth(auth.refresh);
-      }
-
-      throw new AntigravityTokenRefreshError({
-        message,
-        code,
-        description: description ?? errorText,
-        status: response.status,
-        statusText: response.statusText,
+  const refreshPromise = (async () => {
+    try {
+      const startTime = Date.now();
+      const response = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: parts.refreshToken,
+          client_id: ANTIGRAVITY_CLIENT_ID,
+          client_secret: ANTIGRAVITY_CLIENT_SECRET,
+        }),
       });
+
+      if (!response.ok) {
+        let errorText: string | undefined;
+        try {
+          errorText = await response.text();
+        } catch {
+          errorText = undefined;
+        }
+
+        const { code, description } = parseOAuthErrorPayload(errorText);
+        const details = [code, description ?? errorText].filter(Boolean).join(": ");
+        const baseMessage = `Antigravity token refresh failed (${response.status} ${response.statusText})`;
+        const message = details ? `${baseMessage} - ${details}` : baseMessage;
+        log.warn("Token refresh failed", { status: response.status, code, details });
+
+        if (code === "invalid_grant") {
+          log.warn("Google revoked the stored refresh token - reauthentication required");
+          invalidateProjectContextCache(auth.refresh);
+          clearCachedAuth(auth.refresh);
+        }
+
+        throw new AntigravityTokenRefreshError({
+          message,
+          code,
+          description: description ?? errorText,
+          status: response.status,
+          statusText: response.statusText,
+        });
+      }
+
+      const payload = (await response.json()) as {
+        access_token: string;
+        expires_in: number;
+        refresh_token?: string;
+      };
+
+      const refreshedParts: RefreshParts = {
+        refreshToken: payload.refresh_token ?? parts.refreshToken,
+        projectId: parts.projectId,
+        managedProjectId: parts.managedProjectId,
+      };
+
+      const updatedAuth: OAuthAuthDetails = {
+        ...auth,
+        access: payload.access_token,
+        expires: calculateTokenExpiry(startTime, payload.expires_in),
+        refresh: formatRefreshParts(refreshedParts),
+      };
+
+      storeCachedAuth(updatedAuth);
+      invalidateProjectContextCache(auth.refresh);
+
+      return updatedAuth;
+    } catch (error) {
+      if (error instanceof AntigravityTokenRefreshError) {
+        throw error;
+      }
+      log.error("Unexpected token refresh error", { error: String(error) });
+      return undefined;
+    } finally {
+      inFlightRefreshes.delete(parts.refreshToken);
     }
+  })();
 
-    const payload = (await response.json()) as {
-      access_token: string;
-      expires_in: number;
-      refresh_token?: string;
-    };
-
-    const refreshedParts: RefreshParts = {
-      refreshToken: payload.refresh_token ?? parts.refreshToken,
-      projectId: parts.projectId,
-      managedProjectId: parts.managedProjectId,
-    };
-
-    const updatedAuth: OAuthAuthDetails = {
-      ...auth,
-      access: payload.access_token,
-      expires: calculateTokenExpiry(startTime, payload.expires_in),
-      refresh: formatRefreshParts(refreshedParts),
-    };
-
-    storeCachedAuth(updatedAuth);
-    invalidateProjectContextCache(auth.refresh);
-
-    return updatedAuth;
-  } catch (error) {
-    if (error instanceof AntigravityTokenRefreshError) {
-      throw error;
-    }
-    log.error("Unexpected token refresh error", { error: String(error) });
-    return undefined;
-  }
+  inFlightRefreshes.set(parts.refreshToken, refreshPromise);
+  return refreshPromise;
 }
 

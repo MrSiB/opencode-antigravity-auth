@@ -20,6 +20,15 @@ export interface GeminiCliQuotaSummary {
     models: GeminiCliQuotaModel[];
     error?: string;
 }
+interface RetrieveUserQuotaResponse {
+    buckets?: {
+        remainingAmount?: string;
+        remainingFraction?: number;
+        resetTime?: string;
+        tokenType?: string;
+        modelId?: string;
+    }[];
+}
 export type AccountQuotaStatus = "ok" | "disabled" | "error";
 export interface AccountQuotaResult {
     index: number;
@@ -44,6 +53,7 @@ export interface FetchAvailableModelEntry {
 }
 declare function aggregateQuota(models?: Record<string, FetchAvailableModelEntry>): QuotaSummary;
 export declare function fetchAvailableModels(accessToken: string, projectId: string): Promise<FetchAvailableModelsResponse>;
+declare function aggregateGeminiCliQuota(response: RetrieveUserQuotaResponse): GeminiCliQuotaSummary;
 /**
  * Run an async mapper over items with a bounded number of concurrent workers.
  * Results preserve the original item order regardless of completion order.
@@ -52,6 +62,7 @@ declare function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (
 export declare function checkAccountsQuota(accounts: AccountMetadataV3[], client: PluginClient, providerId?: string): Promise<AccountQuotaResult[]>;
 export declare const __testExports: {
     aggregateQuota: typeof aggregateQuota;
+    aggregateGeminiCliQuota: typeof aggregateGeminiCliQuota;
     mapWithConcurrency: typeof mapWithConcurrency;
 };
 export {};

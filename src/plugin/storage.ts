@@ -177,7 +177,7 @@ export interface AccountStorage {
   activeIndex: number;
 }
 
-export type CooldownReason = "auth-failure" | "network-error" | "project-error" | "validation-required";
+export type CooldownReason = "auth-failure" | "network-error" | "project-error" | "validation-required" | "last-survivor-cooldown";
 
 export interface AccountMetadataV3 {
   email?: string;
@@ -220,6 +220,8 @@ export interface AccountMetadataV3 {
   /** Cached soft quota data */
   cachedQuota?: Record<string, { remainingFraction?: number; resetTime?: string; modelCount: number }>;
   cachedQuotaUpdatedAt?: number;
+  tag?: string;
+  tags?: string[];
 }
 
 export interface AccountStorageV3 {
@@ -232,11 +234,18 @@ export interface AccountStorageV3 {
   };
 }
 
+export interface DeletedRefreshTokenHashEntry {
+  hash: string;
+  deletedAt: number;
+}
+
+export type DeletedRefreshTokenHash = string | DeletedRefreshTokenHashEntry;
+
 export interface AccountStorageV4 {
   version: 4;
   accounts: AccountMetadataV3[];
   activeIndex: number;
-  deletedRefreshTokenHashes?: string[];
+  deletedRefreshTokenHashes?: DeletedRefreshTokenHash[];
   activeIndexByFamily?: {
     claude?: number;
     gemini?: number;
@@ -423,6 +432,84 @@ async function withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
  * Kept in sync with RATE_LIMIT_CLEAR_TTL_MS in accounts.ts.
  */
 const RATE_LIMIT_CLEAR_TTL_MS = 24 * 60 * 60 * 1000;
+
+export const DELETED_HASH_TTL_MS = 24 * 60 * 60 * 1000;
+
+export function hashRefreshToken(refreshToken: string): string {
+  return createHash("sha256").update(refreshToken).digest("hex");
+}
+
+export function parseDeletedHashEntry(entry: unknown): { hash: string; deletedAt?: number } | null {
+  if (typeof entry === "string") {
+    const trimmed = entry.trim();
+    if (!trimmed) return null;
+    const colonIndex = trimmed.lastIndexOf(":");
+    if (colonIndex > 0) {
+      const hash = trimmed.slice(0, colonIndex);
+      const ts = Number(trimmed.slice(colonIndex + 1));
+      if (Number.isFinite(ts)) {
+        return { hash, deletedAt: ts };
+      }
+    }
+    return { hash: trimmed };
+  }
+  if (typeof entry === "object" && entry !== null) {
+    const obj = entry as Record<string, unknown>;
+    if (typeof obj.hash === "string" && obj.hash.trim()) {
+      const ts =
+        typeof obj.deletedAt === "number"
+          ? obj.deletedAt
+          : typeof obj.timestamp === "number"
+            ? obj.timestamp
+            : typeof obj.at === "number"
+              ? obj.at
+              : undefined;
+      return { hash: obj.hash.trim(), deletedAt: typeof ts === "number" && Number.isFinite(ts) ? ts : undefined };
+    }
+  }
+  return null;
+}
+
+export function getActiveDeletedHashes(
+  entries: DeletedRefreshTokenHash[] | undefined,
+  now = Date.now(),
+): Map<string, number | undefined> {
+  const result = new Map<string, number | undefined>();
+  if (!entries || !Array.isArray(entries)) return result;
+
+  for (const item of entries) {
+    const parsed = parseDeletedHashEntry(item);
+    if (!parsed) continue;
+
+    if (parsed.deletedAt !== undefined && now - parsed.deletedAt > DELETED_HASH_TTL_MS) {
+      continue;
+    }
+
+    const existingTs = result.get(parsed.hash);
+    if (existingTs === undefined) {
+      result.set(parsed.hash, parsed.deletedAt);
+    } else if (parsed.deletedAt !== undefined) {
+      result.set(parsed.hash, Math.max(existingTs ?? 0, parsed.deletedAt));
+    }
+  }
+
+  return result;
+}
+
+export function serializeDeletedHashes(
+  hashes: Map<string, number | undefined>,
+): DeletedRefreshTokenHash[] | undefined {
+  if (hashes.size === 0) return undefined;
+  const list: DeletedRefreshTokenHash[] = [];
+  for (const [hash, deletedAt] of hashes.entries()) {
+    if (deletedAt !== undefined) {
+      list.push({ hash, deletedAt });
+    } else {
+      list.push(hash);
+    }
+  }
+  return list.length > 0 ? list : undefined;
+}
 
 /** Keep only finite numeric timestamps (drops corrupt/foreign values). */
 function numericTimestamp(value: unknown): number | undefined {
@@ -638,30 +725,58 @@ function mergeAccountStorage(
   incoming: AccountStorageV4,
 ): AccountStorageV4 {
   const accountMap = new Map<string, AccountMetadataV3>();
-  const deletedRefreshTokenHashes = new Set([
-    ...(existing.deletedRefreshTokenHashes ?? []),
-    ...(incoming.deletedRefreshTokenHashes ?? []),
-  ]);
+  const activeDeletedHashes = new Map<string, number | undefined>();
+  for (const [hash, deletedAt] of getActiveDeletedHashes(existing.deletedRefreshTokenHashes).entries()) {
+    activeDeletedHashes.set(hash, deletedAt);
+  }
+  for (const [hash, deletedAt] of getActiveDeletedHashes(incoming.deletedRefreshTokenHashes).entries()) {
+    const cur = activeDeletedHashes.get(hash);
+    activeDeletedHashes.set(hash, maxDefined(cur, deletedAt));
+  }
+
+  for (const acc of incoming.accounts) {
+    if (acc.refreshToken) {
+      const hash = hashRefreshToken(acc.refreshToken);
+      if (activeDeletedHashes.has(hash)) {
+        const deletedAt = activeDeletedHashes.get(hash);
+        const hasTimestamps = acc.addedAt !== undefined || acc.lastUsed !== undefined;
+        const accTime = Math.max(acc.addedAt ?? 0, acc.lastUsed ?? 0);
+        if (deletedAt !== undefined) {
+          if (!hasTimestamps || accTime >= deletedAt) {
+            activeDeletedHashes.delete(hash);
+          }
+        } else {
+          activeDeletedHashes.delete(hash);
+        }
+      }
+    }
+  }
 
   for (const acc of existing.accounts) {
-    if (acc.refreshToken && !deletedRefreshTokenHashes.has(hashRefreshToken(acc.refreshToken))) {
+    if (acc.refreshToken && !activeDeletedHashes.has(hashRefreshToken(acc.refreshToken))) {
       accountMap.set(acc.refreshToken, acc);
     }
   }
 
   for (const acc of incoming.accounts) {
-    if (acc.refreshToken && !deletedRefreshTokenHashes.has(hashRefreshToken(acc.refreshToken))) {
+    if (acc.refreshToken && !activeDeletedHashes.has(hashRefreshToken(acc.refreshToken))) {
       const existingAcc = accountMap.get(acc.refreshToken);
       if (existingAcc) {
-        accountMap.set(acc.refreshToken, {
-          ...existingAcc,
-          ...acc,
-          // Preserve manually configured projectId/managedProjectId if not in incoming
-          projectId: acc.projectId ?? existingAcc.projectId,
-          managedProjectId: acc.managedProjectId ?? existingAcc.managedProjectId,
-          ...mergeRateLimitState(existingAcc, acc),
-          lastUsed: Math.max(existingAcc.lastUsed || 0, acc.lastUsed || 0),
-        });
+          accountMap.set(acc.refreshToken, {
+            ...existingAcc,
+            ...acc,
+            // Preserve manually configured projectId/managedProjectId if not in incoming
+            projectId: acc.projectId ?? existingAcc.projectId,
+            managedProjectId: acc.managedProjectId ?? existingAcc.managedProjectId,
+            tag: acc.tag ?? existingAcc.tag,
+            tags: acc.tags ?? existingAcc.tags,
+            verificationRequired: acc.verificationRequired ?? existingAcc.verificationRequired,
+            verificationRequiredAt: acc.verificationRequired === false ? undefined : (acc.verificationRequiredAt ?? existingAcc.verificationRequiredAt),
+            verificationRequiredReason: acc.verificationRequired === false ? undefined : (acc.verificationRequiredReason ?? existingAcc.verificationRequiredReason),
+            verificationUrl: acc.verificationRequired === false ? undefined : (acc.verificationUrl ?? existingAcc.verificationUrl),
+            ...mergeRateLimitState(existingAcc, acc),
+            lastUsed: Math.max(existingAcc.lastUsed || 0, acc.lastUsed || 0),
+          });
       } else {
         accountMap.set(acc.refreshToken, acc);
       }
@@ -678,14 +793,8 @@ function mergeAccountStorage(
       incoming.accounts,
       accounts,
     ),
-    deletedRefreshTokenHashes: deletedRefreshTokenHashes.size > 0
-      ? Array.from(deletedRefreshTokenHashes)
-      : undefined,
+    deletedRefreshTokenHashes: serializeDeletedHashes(activeDeletedHashes),
   };
-}
-
-function hashRefreshToken(refreshToken: string): string {
-  return createHash("sha256").update(refreshToken).digest("hex");
 }
 
 export function deduplicateAccountsByEmail<
@@ -961,16 +1070,14 @@ export async function loadAccounts(): Promise<AccountStorageV4 | null> {
     }
 
     // Validate accounts have required fields
-    const deletedRefreshTokenHashes = new Set(
-      (storage.deletedRefreshTokenHashes ?? []).filter((hash): hash is string => typeof hash === "string"),
-    );
+    const activeDeletedHashes = getActiveDeletedHashes(storage.deletedRefreshTokenHashes);
     const validAccounts = storage.accounts.filter(
       (a): a is AccountMetadataV3 => {
         return (
           !!a &&
           typeof a === "object" &&
           typeof (a as AccountMetadataV3).refreshToken === "string" &&
-          !deletedRefreshTokenHashes.has(hashRefreshToken((a as AccountMetadataV3).refreshToken))
+          !activeDeletedHashes.has(hashRefreshToken((a as AccountMetadataV3).refreshToken))
         );
       },
     );
@@ -990,6 +1097,46 @@ export async function loadAccounts(): Promise<AccountStorageV4 | null> {
     // Deduplicate accounts by email (keeps newest entry for each email)
     const deduplicatedAccounts = deduplicateAccountsByEmail(sanitizedAccounts);
 
+    if (deduplicatedAccounts.length > 0 && deduplicatedAccounts.every((acc) => acc.enabled === false)) {
+      log.warn("Startup fail-safe recovery activated: all accounts were disabled. Auto-re-enabling all accounts.");
+      const now = Date.now();
+      const STALE_VERIFICATION_THRESHOLD_MS = 30 * 60 * 1000;
+      for (const acc of deduplicatedAccounts) {
+        acc.enabled = true;
+        if (acc.verificationRequired) {
+          const isStale =
+            !acc.verificationRequiredAt ||
+            now - acc.verificationRequiredAt > STALE_VERIFICATION_THRESHOLD_MS;
+          if (isStale) {
+            acc.verificationRequired = false;
+            delete acc.verificationRequiredAt;
+            delete acc.verificationRequiredReason;
+            delete acc.verificationUrl;
+          }
+        }
+      }
+
+      const healedStorage: AccountStorageV4 = {
+        version: 4,
+        accounts: deduplicatedAccounts,
+        activeIndex: remapActiveIndex(
+          validAccounts,
+          deduplicatedAccounts,
+          storage.activeIndex,
+        ),
+        deletedRefreshTokenHashes: serializeDeletedHashes(activeDeletedHashes),
+        activeIndexByFamily: remapActiveIndexByFamily(
+          storage.activeIndexByFamily,
+          validAccounts,
+          deduplicatedAccounts,
+        ),
+      };
+
+      saveAccounts(healedStorage).catch((err) => {
+        log.warn("Failed to persist healed accounts storage", { error: String(err) });
+      });
+    }
+
     const activeIndex = remapActiveIndex(
       validAccounts,
       deduplicatedAccounts,
@@ -1000,9 +1147,7 @@ export async function loadAccounts(): Promise<AccountStorageV4 | null> {
       version: 4,
       accounts: deduplicatedAccounts,
       activeIndex,
-      deletedRefreshTokenHashes: deletedRefreshTokenHashes.size > 0
-        ? Array.from(deletedRefreshTokenHashes)
-        : undefined,
+      deletedRefreshTokenHashes: serializeDeletedHashes(activeDeletedHashes),
       activeIndexByFamily: remapActiveIndexByFamily(
         storage.activeIndexByFamily,
         validAccounts,
@@ -1027,7 +1172,9 @@ export async function saveAccounts(storage: AccountStorageV4): Promise<void> {
 
   await withFileLock(path, async () => {
     const existing = await loadAccountsUnsafe();
-    const merged = existing ? mergeAccountStorage(existing, storage) : storage;
+    const merged = existing
+      ? mergeAccountStorage(existing, storage)
+      : mergeAccountStorage({ version: 4, accounts: [], activeIndex: 0 }, storage);
     await writeAccountsAtomically(path, merged);
   });
 }
@@ -1045,18 +1192,27 @@ export async function saveAccountsReplace(storage: AccountStorageV4): Promise<vo
 
   await withFileLock(path, async () => {
     const existing = await loadAccountsUnsafe();
-    const deletedRefreshTokenHashes = new Set([
-      ...(existing?.deletedRefreshTokenHashes ?? []),
-      ...(storage.deletedRefreshTokenHashes ?? []),
-    ]);
+    const activeDeletedHashes = new Map<string, number | undefined>();
+    for (const [hash, deletedAt] of getActiveDeletedHashes(existing?.deletedRefreshTokenHashes).entries()) {
+      activeDeletedHashes.set(hash, deletedAt);
+    }
+    for (const [hash, deletedAt] of getActiveDeletedHashes(storage.deletedRefreshTokenHashes).entries()) {
+      const cur = activeDeletedHashes.get(hash);
+      activeDeletedHashes.set(hash, maxDefined(cur, deletedAt));
+    }
+
+    for (const account of storage.accounts) {
+      if (account.refreshToken) {
+        activeDeletedHashes.delete(hashRefreshToken(account.refreshToken));
+      }
+    }
+
     await writeAccountsAtomically(path, {
       ...storage,
       accounts: storage.accounts.filter(
-        (account) => !deletedRefreshTokenHashes.has(hashRefreshToken(account.refreshToken)),
+        (account) => !activeDeletedHashes.has(hashRefreshToken(account.refreshToken)),
       ),
-      deletedRefreshTokenHashes: deletedRefreshTokenHashes.size > 0
-        ? Array.from(deletedRefreshTokenHashes)
-        : undefined,
+      deletedRefreshTokenHashes: serializeDeletedHashes(activeDeletedHashes),
     });
   });
 }
@@ -1070,15 +1226,20 @@ export async function removeAccountFromStorage(refreshToken: string): Promise<vo
   await withFileLock(path, async () => {
     const existing = await loadAccountsUnsafe();
     if (!existing) return;
-    const accounts = existing.accounts.filter((account) => account.refreshToken !== refreshToken);
-    const deletedRefreshTokenHashes = new Set(existing.deletedRefreshTokenHashes ?? []);
-    deletedRefreshTokenHashes.add(hashRefreshToken(refreshToken));
+    const activeDeletedHashes = getActiveDeletedHashes(existing.deletedRefreshTokenHashes);
+    activeDeletedHashes.set(hashRefreshToken(refreshToken), Date.now());
+
+    const accounts = existing.accounts.filter(
+      (account) =>
+        account.refreshToken !== refreshToken &&
+        (!account.refreshToken || !activeDeletedHashes.has(hashRefreshToken(account.refreshToken))),
+    );
 
     await writeAccountsAtomically(path, {
       version: 4,
       accounts,
       activeIndex: remapActiveIndex(existing.accounts, accounts, existing.activeIndex),
-      deletedRefreshTokenHashes: Array.from(deletedRefreshTokenHashes),
+      deletedRefreshTokenHashes: serializeDeletedHashes(activeDeletedHashes),
       activeIndexByFamily: remapActiveIndexByFamily(
         existing.activeIndexByFamily,
         existing.accounts,
@@ -1094,7 +1255,22 @@ async function writeAccountsAtomically(path: string, storage: AccountStorageV4):
 
   try {
     await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
-    await fs.rename(tempPath, path);
+    try {
+      await fs.rename(tempPath, path);
+    } catch (renameError) {
+      const code = (renameError as NodeJS.ErrnoException).code;
+      if (code === "EBUSY" || code === "EXDEV" || code === "EPERM") {
+        log.warn("Atomic rename failed, falling back to copy+unlink", {
+          code,
+          tempPath,
+          path,
+        });
+        await fs.copyFile(tempPath, path);
+        await fs.unlink(tempPath);
+      } else {
+        throw renameError;
+      }
+    }
   } catch (error) {
     try {
       await fs.unlink(tempPath);

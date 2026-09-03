@@ -107,6 +107,7 @@ export interface PluginResult {
   event?: (payload: PluginEventPayload) => void;
   tool?: Record<string, unknown>;
   provider?: ProviderHook;
+  dispose?: () => Promise<void> | void;
 }
 
 export interface RefreshParts {

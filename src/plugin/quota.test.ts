@@ -142,3 +142,37 @@ describe("mapWithConcurrency", () => {
     expect(results).toEqual([]);
   });
 });
+
+describe("Gemini CLI quota aggregation", () => {
+  it("sorts quota buckets cleanly without throwing TypeError when modelId is undefined or missing", () => {
+    const summary = __testExports.aggregateGeminiCliQuota({
+      buckets: [
+        {
+          modelId: "gemini-3-flash",
+          remainingFraction: 0.8,
+        },
+        {
+          modelId: undefined,
+          remainingFraction: 0.5,
+        },
+        {
+          remainingFraction: 0.2,
+        },
+        {
+          modelId: "gemini-2.5-pro",
+          remainingFraction: 1.0,
+        },
+      ],
+    });
+
+    expect(summary.models.map((m) => m.modelId)).toEqual([
+      "gemini-2.5-pro",
+      "gemini-3-flash",
+    ]);
+  });
+
+  it("handles empty or missing buckets array safely", () => {
+    expect(__testExports.aggregateGeminiCliQuota({}).models).toEqual([]);
+    expect(__testExports.aggregateGeminiCliQuota({ buckets: [] }).models).toEqual([]);
+  });
+});

@@ -73,7 +73,7 @@ export function readMessages(sessionID: string): StoredMessageMeta[] {
     const aTime = a.time?.created ?? 0;
     const bTime = b.time?.created ?? 0;
     if (aTime !== bTime) return aTime - bTime;
-    return a.id.localeCompare(b.id);
+    return (a.id ?? "").localeCompare(b.id ?? "");
   });
 }
 
@@ -215,7 +215,7 @@ export function findMessagesWithOrphanThinking(sessionID: string): string[] {
     const parts = readParts(msg.id);
     if (parts.length === 0) continue;
 
-    const sortedParts = [...parts].sort((a, b) => a.id.localeCompare(b.id));
+    const sortedParts = [...parts].sort((a, b) => (a.id ?? "").localeCompare(b.id ?? ""));
     const firstPart = sortedParts[0];
     if (!firstPart) continue;
 
@@ -330,7 +330,7 @@ export function findMessageByIndexNeedingThinking(sessionID: string, targetIndex
   const parts = readParts(targetMsg.id);
   if (parts.length === 0) return null;
 
-  const sortedParts = [...parts].sort((a, b) => a.id.localeCompare(b.id));
+  const sortedParts = [...parts].sort((a, b) => (a.id ?? "").localeCompare(b.id ?? ""));
   const firstPart = sortedParts[0];
   if (!firstPart) return null;
 

@@ -19,7 +19,19 @@ vi.mock("./storage", async (importOriginal) => {
 describe("AccountManager", () => {
   beforeEach(() => {
     vi.useRealTimers();
-    vi.stubGlobal("process", { ...process, pid: 0 });
+    vi.stubGlobal(
+      "process",
+      new Proxy(process, {
+        get(target, prop) {
+          if (prop === "pid") return 0;
+          const val = (target as unknown as Record<string, unknown>)[prop as string];
+          if (typeof val === "function") {
+            return (val as (...args: unknown[]) => unknown).bind(target);
+          }
+          return val;
+        },
+      }),
+    );
   });
 
   it("treats on-disk storage as source of truth, even when empty", () => {
@@ -2312,6 +2324,196 @@ describe("AccountManager", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("preserves tag and tags in ManagedAccount and saveToDisk snapshot", async () => {
+      const stored: AccountStorageV4 = {
+        version: 4,
+        accounts: [
+          {
+            email: "tagged@example.com",
+            refreshToken: "r1",
+            addedAt: 1,
+            lastUsed: 1,
+            tag: "prod",
+            tags: ["prod", "fast"],
+          },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const accounts = manager.getAccounts();
+      expect(accounts[0]?.tag).toBe("prod");
+      expect(accounts[0]?.tags).toEqual(["prod", "fast"]);
+
+      const saveSpy = vi.mocked(storageModule.saveAccounts);
+      saveSpy.mockClear();
+      await manager.saveToDisk();
+
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+      const snapshot = saveSpy.mock.calls[0]![0];
+      expect(snapshot.accounts[0]?.tag).toBe("prod");
+      expect(snapshot.accounts[0]?.tags).toEqual(["prod", "fast"]);
+    });
+
+    describe("Last Survivor Rule", () => {
+      it("preserves final enabled account when sequential 403 errors hit all accounts", () => {
+        const stored: AccountStorageV4 = {
+          version: 4,
+          accounts: [
+            { email: "a@example.com", refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0, enabled: true },
+            { email: "b@example.com", refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0, enabled: true },
+            { email: "c@example.com", refreshToken: "r3", projectId: "p3", addedAt: 1, lastUsed: 0, enabled: true },
+          ],
+          activeIndex: 0,
+        };
+
+        const manager = new AccountManager(undefined, stored);
+        expect(manager.getEnabledAccounts()).toHaveLength(3);
+
+        manager.markAccountVerificationRequired(0, "validation_required");
+        expect(manager.getAccounts()[0]?.enabled).toBe(false);
+        expect(manager.getEnabledAccounts()).toHaveLength(2);
+
+        manager.markAccountVerificationRequired(1, "validation_required");
+        expect(manager.getAccounts()[1]?.enabled).toBe(false);
+        expect(manager.getEnabledAccounts()).toHaveLength(1);
+
+        manager.markAccountVerificationRequired(2, "validation_required");
+        const accounts = manager.getAccounts();
+        expect(accounts[2]?.enabled).toBe(true);
+        expect(manager.getEnabledAccounts()).toHaveLength(1);
+        expect(manager.getAccountCount()).toBe(1);
+        expect(manager.isAccountCoolingDown(accounts[2]!)).toBe(true);
+        expect(manager.getAccountCooldownReason(accounts[2]!)).toBe("last-survivor-cooldown");
+        expect(accounts[2]?.verificationRequired).toBe(true);
+      });
+
+      it("keeps single account enabled with cooldown when verification is required", () => {
+        const stored: AccountStorageV4 = {
+          version: 4,
+          accounts: [
+            { email: "solo@example.com", refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0, enabled: true },
+          ],
+          activeIndex: 0,
+        };
+
+        const manager = new AccountManager(undefined, stored);
+        expect(manager.getEnabledAccounts()).toHaveLength(1);
+
+        manager.markAccountVerificationRequired(0, "validation_required");
+        const account = manager.getAccounts()[0]!;
+        expect(account.enabled).toBe(true);
+        expect(manager.getEnabledAccounts()).toHaveLength(1);
+        expect(manager.isAccountCoolingDown(account)).toBe(true);
+        expect(manager.getAccountCooldownReason(account)).toBe("last-survivor-cooldown");
+      });
+    });
+
+    describe("Startup Fail-Safe Recovery in AccountManager", () => {
+      it("re-enables all accounts when 100% of accounts are disabled on startup", () => {
+        const now = Date.now();
+        const stored: AccountStorageV4 = {
+          version: 4,
+          accounts: [
+            {
+              email: "stale@example.com",
+              refreshToken: "r1",
+              addedAt: 1,
+              lastUsed: 0,
+              enabled: false,
+              verificationRequired: true,
+              verificationRequiredAt: now - 40 * 60 * 1000,
+              verificationRequiredReason: "stale reason",
+              verificationUrl: "https://accounts.google.com/stale",
+            },
+            {
+              email: "recent@example.com",
+              refreshToken: "r2",
+              addedAt: 1,
+              lastUsed: 0,
+              enabled: false,
+              verificationRequired: true,
+              verificationRequiredAt: now - 10 * 60 * 1000,
+              verificationRequiredReason: "recent reason",
+              verificationUrl: "https://accounts.google.com/recent",
+            },
+            {
+              email: "regular@example.com",
+              refreshToken: "r3",
+              addedAt: 1,
+              lastUsed: 0,
+              enabled: false,
+            },
+          ],
+          activeIndex: 0,
+        };
+
+        const manager = new AccountManager(undefined, stored);
+        const accounts = manager.getAccounts();
+
+        expect(accounts.every((a) => a.enabled === true)).toBe(true);
+        expect(manager.getEnabledAccounts()).toHaveLength(3);
+
+        const staleAcc = accounts[0]!;
+        expect(staleAcc.verificationRequired).toBe(false);
+        expect(staleAcc.verificationRequiredAt).toBeUndefined();
+        expect(staleAcc.verificationRequiredReason).toBeUndefined();
+        expect(staleAcc.verificationUrl).toBeUndefined();
+
+        const recentAcc = accounts[1]!;
+        expect(recentAcc.verificationRequired).toBe(true);
+        expect(recentAcc.verificationRequiredAt).toBe(now - 10 * 60 * 1000);
+      });
+    });
+
+    describe("Process exit handlers and flushSaveToDisk", () => {
+      it("flushes pending debounced save immediately when flushSaveToDisk is called", async () => {
+        const stored: AccountStorageV4 = {
+          version: 4,
+          accounts: [
+            { refreshToken: "r1", addedAt: 1, lastUsed: 0, enabled: true },
+          ],
+          activeIndex: 0,
+        };
+
+        const manager = new AccountManager(undefined, stored);
+        const saveSpy = vi.mocked(storageModule.saveAccounts);
+        saveSpy.mockClear();
+
+        manager.requestSaveToDisk();
+        expect(saveSpy).not.toHaveBeenCalled();
+
+        await manager.flushSaveToDisk();
+        expect(saveSpy).toHaveBeenCalledTimes(1);
+      });
+
+      it("triggers flushSaveToDisk on process exit signals", async () => {
+        const stored: AccountStorageV4 = {
+          version: 4,
+          accounts: [
+            { refreshToken: "r1", addedAt: 1, lastUsed: 0, enabled: true },
+          ],
+          activeIndex: 0,
+        };
+
+        const manager = new AccountManager(undefined, stored);
+        const saveSpy = vi.mocked(storageModule.saveAccounts);
+        saveSpy.mockClear();
+
+        const unregister = manager.registerExitHandlers();
+
+        manager.requestSaveToDisk();
+        expect(saveSpy).not.toHaveBeenCalled();
+
+        process.emit("SIGTERM", "SIGTERM");
+
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(saveSpy).toHaveBeenCalledTimes(1);
+
+        unregister();
+      });
     });
   });
 });

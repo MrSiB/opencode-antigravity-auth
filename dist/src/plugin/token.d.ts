@@ -12,8 +12,6 @@ export declare class AntigravityTokenRefreshError extends Error {
         statusText: string;
     });
 }
-/**
- * Refreshes an Antigravity OAuth access token, updates persisted credentials, and handles revocation.
- */
-export declare function refreshAccessToken(auth: OAuthAuthDetails, client: PluginClient, providerId: string): Promise<OAuthAuthDetails | undefined>;
+export declare function clearInFlightRefreshes(): void;
+export declare function refreshAccessToken(auth: OAuthAuthDetails, _client: PluginClient, _providerId: string): Promise<OAuthAuthDetails | undefined>;
 //# sourceMappingURL=token.d.ts.map

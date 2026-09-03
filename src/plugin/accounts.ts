@@ -8,6 +8,9 @@ import type { QuotaGroup, QuotaGroupSummary } from "./quota";
 import { getModelFamily } from "./transform/model-resolver";
 import { debugLogToFile } from "./debug";
 import { formatAccountLabel } from "./logging-utils";
+import { createLogger } from "./logger";
+
+const log = createLogger("accounts");
 
 
 export type { ModelFamily, HeaderStyle, CooldownReason } from "./storage";
@@ -184,6 +187,8 @@ export interface ManagedAccount {
   verificationRequiredAt?: number;
   verificationRequiredReason?: string;
   verificationUrl?: string;
+  tag?: string;
+  tags?: string[];
 }
 
 function nowMs(): number {
@@ -479,10 +484,56 @@ export class AccountManager {
   /** Tracks an in-flight disk write so flushSaveToDisk can await a write that has
    * already started (savePending is cleared before the write settles). */
   private activeSave: Promise<void> | null = null;
+  private static exitHandlersRegistered = false;
+  private static activeInstances = new Set<AccountManager>();
+  private static unregisterExitHandlersFn: (() => void) | null = null;
+
+  static clearExitHandlersForTests(): void {
+    AccountManager.activeInstances.clear();
+  }
 
   static async loadFromDisk(authFallback?: OAuthAuthDetails): Promise<AccountManager> {
     const stored = await loadAccounts();
-    return new AccountManager(authFallback, stored);
+    const manager = new AccountManager(authFallback, stored);
+    manager.registerExitHandlers();
+    return manager;
+  }
+
+  registerExitHandlers(): () => void {
+    AccountManager.activeInstances.add(this);
+
+    if (!AccountManager.exitHandlersRegistered) {
+      AccountManager.exitHandlersRegistered = true;
+
+      const onExit = () => {
+        for (const instance of AccountManager.activeInstances) {
+          instance.flushSaveToDisk().catch(() => {});
+        }
+      };
+
+      if (typeof process?.once === "function") {
+        process.once("SIGTERM", onExit);
+        process.once("SIGINT", onExit);
+        process.once("beforeExit", onExit);
+      }
+
+      AccountManager.unregisterExitHandlersFn = () => {
+        if (typeof process?.removeListener === "function") {
+          process.removeListener("SIGTERM", onExit);
+          process.removeListener("SIGINT", onExit);
+          process.removeListener("beforeExit", onExit);
+        }
+        AccountManager.exitHandlersRegistered = false;
+        AccountManager.unregisterExitHandlersFn = null;
+      };
+    }
+
+    return () => {
+      AccountManager.activeInstances.delete(this);
+      if (AccountManager.unregisterExitHandlersFn && AccountManager.activeInstances.size === 0) {
+        AccountManager.unregisterExitHandlersFn();
+      }
+    };
   }
 
   constructor(authFallback?: OAuthAuthDetails, stored?: AccountStorageV4 | null) {
@@ -539,6 +590,8 @@ export class AccountManager {
             verificationRequiredAt: acc.verificationRequiredAt,
             verificationRequiredReason: acc.verificationRequiredReason,
             verificationUrl: acc.verificationUrl,
+            tag: acc.tag,
+            tags: acc.tags ? [...acc.tags] : undefined,
           };
         })
         .filter((a): a is ManagedAccount => a !== null);
@@ -565,6 +618,28 @@ export class AccountManager {
           stored.activeIndexByFamily?.gemini,
           defaultIndex
         ) % this.accounts.length;
+      }
+
+      if (this.accounts.length > 0 && this.accounts.every((acc) => acc.enabled === false)) {
+        log.warn("Startup fail-safe recovery activated: all accounts were disabled. Auto-re-enabling all accounts.");
+        debugLogToFile("[Account] Startup fail-safe recovery activated: all accounts were disabled. Auto-re-enabling all accounts.");
+        const now = nowMs();
+        const STALE_VERIFICATION_THRESHOLD_MS = 30 * 60 * 1000;
+        for (const acc of this.accounts) {
+          acc.enabled = true;
+          if (acc.verificationRequired) {
+            const isStale =
+              !acc.verificationRequiredAt ||
+              now - acc.verificationRequiredAt > STALE_VERIFICATION_THRESHOLD_MS;
+            if (isStale) {
+              acc.verificationRequired = false;
+              acc.verificationRequiredAt = undefined;
+              acc.verificationRequiredReason = undefined;
+              acc.verificationUrl = undefined;
+            }
+          }
+        }
+        this.requestSaveToDisk();
       }
 
       // Persist updated fingerprint versions to disk
@@ -1020,7 +1095,19 @@ export class AccountManager {
     }
 
     if (account.enabled !== false) {
-      this.setAccountEnabled(accountIndex, false);
+      if (this.getEnabledAccounts().length <= 1) {
+        log.warn("Last survivor rule activated: preventing disabling of the last enabled account", {
+          accountIndex,
+          email: account.email,
+        });
+        debugLogToFile(
+          `[Account] Last survivor rule activated: account ${accountIndex} (${account.email ?? ""}) remains enabled with cooldown`,
+        );
+        this.markAccountCoolingDown(account, 10 * 60 * 1000, "last-survivor-cooldown");
+        this.requestSaveToDisk();
+      } else {
+        this.setAccountEnabled(accountIndex, false);
+      }
     } else {
       this.requestSaveToDisk();
     }
@@ -1275,6 +1362,8 @@ export class AccountManager {
         verificationRequiredAt: a.verificationRequiredAt,
         verificationRequiredReason: a.verificationRequiredReason,
         verificationUrl: a.verificationUrl,
+        tag: a.tag,
+        tags: a.tags?.length ? [...a.tags] : undefined,
       })),
       activeIndex: claudeIndex,
       activeIndexByFamily: {
@@ -1331,16 +1420,13 @@ export class AccountManager {
   }
 
   async flushSaveToDisk(): Promise<void> {
-    // Drain until there is neither a pending (debounced) save waiting to fire nor
-    // an in-flight write. Re-check after every await: completing one save can leave
-    // a NEWER debounced save still pending (executeSave clears savePending before
-    // awaiting saveToDisk, so a fresh requestSaveToDisk can schedule another timer),
-    // and a write may still be in flight even when savePending is already false.
     while (this.savePending || this.activeSave) {
       if (this.savePending) {
-        await new Promise<void>((resolve) => {
-          this.savePromiseResolvers.push(resolve);
-        });
+        if (this.saveTimeout) {
+          clearTimeout(this.saveTimeout);
+          this.saveTimeout = null;
+        }
+        await this.executeSave();
       } else if (this.activeSave) {
         await this.activeSave;
       }
@@ -1485,6 +1571,8 @@ export class AccountManager {
       addedAt: a.addedAt,
       lastUsed: a.lastUsed,
       enabled: a.enabled,
+      tag: a.tag,
+      tags: a.tags ? [...a.tags] : undefined,
     }));
   }
 

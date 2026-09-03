@@ -67,7 +67,7 @@ export function readMessages(sessionID) {
         const bTime = b.time?.created ?? 0;
         if (aTime !== bTime)
             return aTime - bTime;
-        return a.id.localeCompare(b.id);
+        return (a.id ?? "").localeCompare(b.id ?? "");
     });
 }
 // =============================================================================
@@ -190,7 +190,7 @@ export function findMessagesWithOrphanThinking(sessionID) {
         const parts = readParts(msg.id);
         if (parts.length === 0)
             continue;
-        const sortedParts = [...parts].sort((a, b) => a.id.localeCompare(b.id));
+        const sortedParts = [...parts].sort((a, b) => (a.id ?? "").localeCompare(b.id ?? ""));
         const firstPart = sortedParts[0];
         if (!firstPart)
             continue;
@@ -291,7 +291,7 @@ export function findMessageByIndexNeedingThinking(sessionID, targetIndex) {
     const parts = readParts(targetMsg.id);
     if (parts.length === 0)
         return null;
-    const sortedParts = [...parts].sort((a, b) => a.id.localeCompare(b.id));
+    const sortedParts = [...parts].sort((a, b) => (a.id ?? "").localeCompare(b.id ?? ""));
     const firstPart = sortedParts[0];
     if (!firstPart)
         return null;

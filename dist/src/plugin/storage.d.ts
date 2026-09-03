@@ -57,7 +57,7 @@ export interface AccountStorage {
     accounts: AccountMetadata[];
     activeIndex: number;
 }
-export type CooldownReason = "auth-failure" | "network-error" | "project-error" | "validation-required";
+export type CooldownReason = "auth-failure" | "network-error" | "project-error" | "validation-required" | "last-survivor-cooldown";
 export interface AccountMetadataV3 {
     email?: string;
     refreshToken: string;
@@ -103,6 +103,8 @@ export interface AccountMetadataV3 {
         modelCount: number;
     }>;
     cachedQuotaUpdatedAt?: number;
+    tag?: string;
+    tags?: string[];
 }
 export interface AccountStorageV3 {
     version: 3;
@@ -113,11 +115,16 @@ export interface AccountStorageV3 {
         gemini?: number;
     };
 }
+export interface DeletedRefreshTokenHashEntry {
+    hash: string;
+    deletedAt: number;
+}
+export type DeletedRefreshTokenHash = string | DeletedRefreshTokenHashEntry;
 export interface AccountStorageV4 {
     version: 4;
     accounts: AccountMetadataV3[];
     activeIndex: number;
-    deletedRefreshTokenHashes?: string[];
+    deletedRefreshTokenHashes?: DeletedRefreshTokenHash[];
     activeIndexByFamily?: {
         claude?: number;
         gemini?: number;
@@ -136,6 +143,14 @@ export declare function getStoragePath(): string;
  * Gets the config directory path. Exported for use by other modules.
  */
 export { getConfigDir };
+export declare const DELETED_HASH_TTL_MS: number;
+export declare function hashRefreshToken(refreshToken: string): string;
+export declare function parseDeletedHashEntry(entry: unknown): {
+    hash: string;
+    deletedAt?: number;
+} | null;
+export declare function getActiveDeletedHashes(entries: DeletedRefreshTokenHash[] | undefined, now?: number): Map<string, number | undefined>;
+export declare function serializeDeletedHashes(hashes: Map<string, number | undefined>): DeletedRefreshTokenHash[] | undefined;
 export declare function deduplicateAccountsByEmail<T extends {
     email?: string;
     lastUsed?: number;

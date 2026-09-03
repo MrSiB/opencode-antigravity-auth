@@ -1,5 +1,23 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { detectErrorType, isRecoverableError } from "./recovery";
+import {
+  readMessages,
+  findMessagesWithOrphanThinking,
+  findMessageByIndexNeedingThinking,
+} from "./recovery/storage";
+import { MESSAGE_STORAGE, PART_STORAGE } from "./recovery/constants";
+import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return {
+    ...actual,
+    existsSync: vi.fn(actual.existsSync),
+    readdirSync: vi.fn(actual.readdirSync),
+    readFileSync: vi.fn(actual.readFileSync),
+  };
+});
 
 describe("detectErrorType", () => {
   describe("tool_result_missing detection", () => {
@@ -152,6 +170,184 @@ describe("context error message patterns", () => {
     it.each(toolPairingPatterns)("'%s' is detected as tool_result_missing", (msg) => {
       expect(detectErrorType(msg)).toBe("tool_result_missing");
       expect(isRecoverableError(msg)).toBe(true);
+    });
+  });
+});
+
+describe("session recovery storage id sorting resilience", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe("readMessages", () => {
+    it("sorts messages without throwing when message id is undefined", () => {
+      const sessionID = "ses_test_null_id";
+      const sessionDir = join(MESSAGE_STORAGE, sessionID);
+
+      const msgFiles = ["msg1.json", "msg2.json", "msg3.json"];
+      const messagesOnDisk: Record<string, string> = {
+        [join(sessionDir, "msg1.json")]: JSON.stringify({
+          id: "msg_beta",
+          time: { created: 1000 },
+          role: "assistant",
+        }),
+        [join(sessionDir, "msg2.json")]: JSON.stringify({
+          time: { created: 1000 },
+          role: "assistant",
+        }), // missing id
+        [join(sessionDir, "msg3.json")]: JSON.stringify({
+          id: "msg_alpha",
+          time: { created: 1000 },
+          role: "assistant",
+        }),
+      };
+
+      vi.mocked(existsSync).mockImplementation((path) => {
+        const p = String(path);
+        return p === MESSAGE_STORAGE || p === sessionDir || p in messagesOnDisk;
+      });
+
+      vi.mocked(readdirSync).mockImplementation((path) => {
+        const p = String(path);
+        if (p === sessionDir) return msgFiles as any;
+        return [] as any;
+      });
+
+      vi.mocked(readFileSync).mockImplementation((path) => {
+        const p = String(path);
+        if (p in messagesOnDisk) {
+          return messagesOnDisk[p] as any;
+        }
+        throw new Error(`ENOENT: ${p}`);
+      });
+
+      expect(() => {
+        const sorted = readMessages(sessionID);
+        expect(sorted).toHaveLength(3);
+        expect(sorted[0]?.id).toBeUndefined();
+        expect(sorted[1]?.id).toBe("msg_alpha");
+        expect(sorted[2]?.id).toBe("msg_beta");
+      }).not.toThrow();
+    });
+  });
+
+  describe("findMessagesWithOrphanThinking", () => {
+    it("sorts parts without throwing when part id is undefined", () => {
+      const sessionID = "ses_test_orphan";
+      const sessionDir = join(MESSAGE_STORAGE, sessionID);
+      const msgId = "msg_asst_1";
+      const partDir = join(PART_STORAGE, msgId);
+
+      const msgFiles = ["msg1.json"];
+      const partFiles = ["part1.json", "part2.json", "part3.json"];
+
+      const storageFiles: Record<string, string> = {
+        [join(sessionDir, "msg1.json")]: JSON.stringify({
+          id: msgId,
+          role: "assistant",
+          time: { created: 1000 },
+        }),
+        [join(partDir, "part1.json")]: JSON.stringify({
+          id: "prt_beta",
+          type: "text",
+          text: "beta text",
+        }),
+        [join(partDir, "part2.json")]: JSON.stringify({
+          type: "text",
+          text: "output text",
+        }), // missing id
+        [join(partDir, "part3.json")]: JSON.stringify({
+          id: "prt_alpha",
+          type: "thinking",
+          text: "thought",
+        }),
+      };
+
+      vi.mocked(existsSync).mockImplementation((path) => {
+        const p = String(path);
+        return p === MESSAGE_STORAGE || p === sessionDir || p === PART_STORAGE || p === partDir || p in storageFiles;
+      });
+
+      vi.mocked(readdirSync).mockImplementation((path) => {
+        const p = String(path);
+        if (p === sessionDir) return msgFiles as any;
+        if (p === partDir) return partFiles as any;
+        return [] as any;
+      });
+
+      vi.mocked(readFileSync).mockImplementation((path) => {
+        const p = String(path);
+        if (p in storageFiles) {
+          return storageFiles[p] as any;
+        }
+        throw new Error(`ENOENT: ${p}`);
+      });
+
+      let result: string[] = [];
+      expect(() => {
+        result = findMessagesWithOrphanThinking(sessionID);
+      }).not.toThrow();
+      expect(result).toEqual([msgId]);
+    });
+  });
+
+  describe("findMessageByIndexNeedingThinking", () => {
+    it("sorts parts without throwing when target message part id is undefined", () => {
+      const sessionID = "ses_test_index";
+      const sessionDir = join(MESSAGE_STORAGE, sessionID);
+      const msgId = "msg_target";
+      const partDir = join(PART_STORAGE, msgId);
+
+      const msgFiles = ["msg1.json"];
+      const partFiles = ["part1.json", "part2.json", "part3.json"];
+
+      const storageFiles: Record<string, string> = {
+        [join(sessionDir, "msg1.json")]: JSON.stringify({
+          id: msgId,
+          role: "assistant",
+          time: { created: 1000 },
+        }),
+        [join(partDir, "part1.json")]: JSON.stringify({
+          id: "prt_beta",
+          type: "text",
+          text: "beta text",
+        }),
+        [join(partDir, "part2.json")]: JSON.stringify({
+          type: "text",
+          text: "direct text",
+        }), // missing id
+        [join(partDir, "part3.json")]: JSON.stringify({
+          id: "prt_alpha",
+          type: "thinking",
+          text: "thought",
+        }),
+      };
+
+      vi.mocked(existsSync).mockImplementation((path) => {
+        const p = String(path);
+        return p === MESSAGE_STORAGE || p === sessionDir || p === PART_STORAGE || p === partDir || p in storageFiles;
+      });
+
+      vi.mocked(readdirSync).mockImplementation((path) => {
+        const p = String(path);
+        if (p === sessionDir) return msgFiles as any;
+        if (p === partDir) return partFiles as any;
+        return [] as any;
+      });
+
+      vi.mocked(readFileSync).mockImplementation((path) => {
+        const p = String(path);
+        if (p in storageFiles) {
+          return storageFiles[p] as any;
+        }
+        throw new Error(`ENOENT: ${p}`);
+      });
+
+      let result: string | null = null;
+      expect(() => {
+        result = findMessageByIndexNeedingThinking(sessionID, 0);
+      }).not.toThrow();
+      expect(result).toBe(msgId);
     });
   });
 });

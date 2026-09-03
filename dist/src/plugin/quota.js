@@ -194,7 +194,7 @@ function aggregateGeminiCliQuota(response) {
         });
     }
     // Sort by model ID for consistent display
-    models.sort((a, b) => a.modelId.localeCompare(b.modelId));
+    models.sort((a, b) => (a.modelId ?? "").localeCompare(b.modelId ?? ""));
     return { models };
 }
 function applyAccountUpdates(account, auth) {
@@ -323,6 +323,7 @@ export async function checkAccountsQuota(accounts, client, providerId = ANTIGRAV
 }
 export const __testExports = {
     aggregateQuota,
+    aggregateGeminiCliQuota,
     mapWithConcurrency,
 };
 //# sourceMappingURL=quota.js.map
