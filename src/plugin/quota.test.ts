@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { __testExports } from "./quota.ts";
+import { __testExports } from "./quota";
 
 describe("Antigravity quota aggregation", () => {
   it("uses the best available Gemini variant instead of the most exhausted rollout variant", () => {

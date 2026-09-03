@@ -4,7 +4,7 @@ import {
   getAntigravityHeaders,
   getRandomizedHeaders,
   type HeaderSet,
-} from "./constants.ts"
+} from "./constants"
 
 describe("GEMINI_CLI_HEADERS", () => {
   it("matches Code Assist headers from opencode-gemini-auth", () => {
