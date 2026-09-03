@@ -1,6 +1,20 @@
 import crypto from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { Agent, type Dispatcher } from "undici";
+
+declare global {
+  interface RequestInit {
+    dispatcher?: Dispatcher;
+  }
+}
+
+export const antigravityDispatcher = new Agent({
+  connectTimeout: 10_000,
+  headersTimeout: 20_000,
+  bodyTimeout: 45_000,
+  keepAliveTimeout: 30_000,
+});
 import {
   ANTIGRAVITY_ENDPOINT,
   GEMINI_CLI_ENDPOINT,
@@ -1188,6 +1202,7 @@ const STREAM_ACTION = "streamGenerateContent";
 
 interface RequestInitWithDuplex extends RequestInit {
   duplex?: "half";
+  dispatcher?: Dispatcher;
 }
 
 function mergeRequestHeaders(
@@ -1222,6 +1237,7 @@ function initFromRequest(
     mode: request.mode,
     integrity: request.integrity,
     keepalive: request.keepalive,
+    dispatcher: init?.dispatcher,
     ...init,
     headers: mergeRequestHeaders(request.headers, init?.headers),
   };
@@ -2471,6 +2487,7 @@ export function prepareAntigravityRequest(
       ...baseInit,
       headers,
       body,
+      dispatcher: baseInit.dispatcher ?? antigravityDispatcher,
     },
     streaming,
     requestedModel,

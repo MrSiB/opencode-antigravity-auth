@@ -1,4 +1,7 @@
+import { StreamIdleTimeoutError, } from './types.js';
 import { processImageData } from '../../image-saver.js';
+export { StreamIdleTimeoutError };
+export const DEFAULT_WATCHDOG_TIMEOUT_MS = 45_000;
 /**
  * Upper bound on the number of thinking-text hashes retained per session.
  *
@@ -259,8 +262,32 @@ export function createStreamingTransformer(signatureStore, callbacks, options = 
     const sentThinkingBuffer = createThoughtBuffer();
     const debugState = { injected: false };
     let hasSeenUsageMetadata = false;
+    const timeoutMs = options.watchdogTimeoutMs ?? DEFAULT_WATCHDOG_TIMEOUT_MS;
+    let watchdogTimer = null;
+    const clearWatchdog = () => {
+        if (watchdogTimer !== null) {
+            clearTimeout(watchdogTimer);
+            watchdogTimer = null;
+        }
+    };
+    const resetWatchdog = (controller) => {
+        clearWatchdog();
+        if (timeoutMs > 0 && timeoutMs !== Infinity) {
+            watchdogTimer = setTimeout(() => {
+                clearWatchdog();
+                try {
+                    controller.error(new StreamIdleTimeoutError(`Stream stalled: no chunks received for ${timeoutMs}ms`, timeoutMs));
+                }
+                catch (_) { }
+            }, timeoutMs);
+        }
+    };
     return new TransformStream({
+        start(controller) {
+            resetWatchdog(controller);
+        },
         transform(chunk, controller) {
+            resetWatchdog(controller);
             buffer += decoder.decode(chunk, { stream: true });
             const lines = buffer.split('\n');
             buffer = lines.pop() || '';
@@ -274,6 +301,7 @@ export function createStreamingTransformer(signatureStore, callbacks, options = 
             }
         },
         flush(controller) {
+            clearWatchdog();
             buffer += decoder.decode();
             if (buffer) {
                 if (buffer.includes('usageMetadata')) {
@@ -295,6 +323,9 @@ export function createStreamingTransformer(signatureStore, callbacks, options = 
                 };
                 controller.enqueue(encoder.encode(`\ndata: ${JSON.stringify(syntheticUsage)}\n\n`));
             }
+        },
+        cancel(_reason) {
+            clearWatchdog();
         },
     });
 }

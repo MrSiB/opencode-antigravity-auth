@@ -6,3 +6,7 @@ declare module "@openauthjs/openauth/pkce" {
 
   export function generatePKCE(): Promise<PkcePair>;
 }
+
+interface Transformer<I = any, O = any> {
+  cancel?(reason?: unknown): void | PromiseLike<void>;
+}

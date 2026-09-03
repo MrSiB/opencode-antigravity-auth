@@ -1,10 +1,14 @@
-import type {
-  SignatureStore,
-  StreamingCallbacks,
-  StreamingOptions,
-  ThoughtBuffer,
+import {
+  StreamIdleTimeoutError,
+  type SignatureStore,
+  type StreamingCallbacks,
+  type StreamingOptions,
+  type ThoughtBuffer,
 } from './types';
 import { processImageData } from '../../image-saver';
+
+export { StreamIdleTimeoutError };
+export const DEFAULT_WATCHDOG_TIMEOUT_MS = 45_000;
 
 /**
  * Upper bound on the number of thinking-text hashes retained per session.
@@ -334,8 +338,39 @@ export function createStreamingTransformer(
   const debugState = { injected: false };
   let hasSeenUsageMetadata = false;
 
+  const timeoutMs = options.watchdogTimeoutMs ?? DEFAULT_WATCHDOG_TIMEOUT_MS;
+  let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearWatchdog = () => {
+    if (watchdogTimer !== null) {
+      clearTimeout(watchdogTimer);
+      watchdogTimer = null;
+    }
+  };
+
+  const resetWatchdog = (controller: TransformStreamDefaultController<Uint8Array>) => {
+    clearWatchdog();
+    if (timeoutMs > 0 && timeoutMs !== Infinity) {
+      watchdogTimer = setTimeout(() => {
+        clearWatchdog();
+        try {
+          controller.error(
+            new StreamIdleTimeoutError(
+              `Stream stalled: no chunks received for ${timeoutMs}ms`,
+              timeoutMs,
+            ),
+          );
+        } catch (_) {}
+      }, timeoutMs);
+    }
+  };
+
   return new TransformStream({
+    start(controller) {
+      resetWatchdog(controller);
+    },
     transform(chunk, controller) {
+      resetWatchdog(controller);
       buffer += decoder.decode(chunk, { stream: true });
 
       const lines = buffer.split('\n');
@@ -360,6 +395,7 @@ export function createStreamingTransformer(
       }
     },
     flush(controller) {
+      clearWatchdog();
       buffer += decoder.decode();
 
       if (buffer) {
@@ -391,6 +427,9 @@ export function createStreamingTransformer(
         };
         controller.enqueue(encoder.encode(`\ndata: ${JSON.stringify(syntheticUsage)}\n\n`));
       }
+    },
+    cancel(_reason?: unknown) {
+      clearWatchdog();
     },
   });
 }

@@ -1,6 +1,13 @@
 import crypto from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { Agent } from "undici";
+export const antigravityDispatcher = new Agent({
+    connectTimeout: 10_000,
+    headersTimeout: 20_000,
+    bodyTimeout: 45_000,
+    keepAliveTimeout: 30_000,
+});
 import { ANTIGRAVITY_ENDPOINT, GEMINI_CLI_ENDPOINT, GEMINI_CLI_HEADERS, EMPTY_SCHEMA_PLACEHOLDER_NAME, EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION, SKIP_THOUGHT_SIGNATURE, MIN_SIGNATURE_LENGTH, getRandomizedHeaders, } from "../constants.js";
 import { cacheSignature, getCachedSignature } from "./cache.js";
 import { getKeepThinking } from "./config/index.js";
@@ -834,6 +841,7 @@ function initFromRequest(request, init, body) {
         mode: request.mode,
         integrity: request.integrity,
         keepalive: request.keepalive,
+        dispatcher: init?.dispatcher,
         ...init,
         headers: mergeRequestHeaders(request.headers, init?.headers),
     };
@@ -1707,6 +1715,7 @@ export function prepareAntigravityRequest(input, init, accessToken, projectId, e
             ...baseInit,
             headers,
             body,
+            dispatcher: baseInit.dispatcher ?? antigravityDispatcher,
         },
         streaming,
         requestedModel,

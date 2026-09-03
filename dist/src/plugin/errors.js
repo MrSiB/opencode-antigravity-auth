@@ -39,4 +39,5 @@ export class ToolIdMismatchError extends Error {
         this.foundIds = foundIds;
     }
 }
+export { StreamIdleTimeoutError } from "./core/streaming/index.js";
 //# sourceMappingURL=errors.js.map

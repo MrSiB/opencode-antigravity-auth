@@ -1,4 +1,6 @@
-import type { SignatureStore, StreamingCallbacks, StreamingOptions, ThoughtBuffer } from './types';
+import { StreamIdleTimeoutError, type SignatureStore, type StreamingCallbacks, type StreamingOptions, type ThoughtBuffer } from './types';
+export { StreamIdleTimeoutError };
+export declare const DEFAULT_WATCHDOG_TIMEOUT_MS = 45000;
 export declare function createThoughtBuffer(): ThoughtBuffer;
 export declare function transformStreamingPayload(payload: string, transformThinkingParts?: (response: unknown) => unknown): string;
 export declare function deduplicateThinkingText(response: unknown, sentBuffer: ThoughtBuffer, displayedThinkingHashes?: Set<string>): unknown;

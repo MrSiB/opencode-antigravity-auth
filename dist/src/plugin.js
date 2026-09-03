@@ -7,7 +7,7 @@ import { accessTokenExpired, isOAuthAuth, parseRefreshParts, formatRefreshParts 
 import { pressEnterToContinue, promptAddAnotherAccount, promptLoginMode, promptProjectId } from "./plugin/cli.js";
 import { ensureProjectContext } from "./plugin/project.js";
 import { startAntigravityDebugRequest, logAntigravityDebugResponse, logAccountContext, logRateLimitEvent, logRateLimitSnapshot, logResponseBody, logModelFamily, isDebugEnabled, getLogFilePath, initializeDebug, sanitizeUrlForLog, } from "./plugin/debug.js";
-import { buildThinkingWarmupBody, isGenerativeLanguageRequest, prepareAntigravityRequest, transformAntigravityResponse, } from "./plugin/request.js";
+import { antigravityDispatcher, buildThinkingWarmupBody, isGenerativeLanguageRequest, prepareAntigravityRequest, transformAntigravityResponse, } from "./plugin/request.js";
 import { isGeminiPublicOnlyModel, resolveModelWithTier, } from "./plugin/transform/model-resolver.js";
 import { isEmptyResponseBody, createSyntheticErrorResponse, } from "./plugin/request-helpers.js";
 import { EmptyResponseError } from "./plugin/errors.js";
@@ -606,6 +606,7 @@ async function verifyAccountAccess(account, client, providerId) {
             headers,
             body: JSON.stringify(requestBody),
             signal: controller.signal,
+            dispatcher: antigravityDispatcher,
         });
     }
     catch (error) {

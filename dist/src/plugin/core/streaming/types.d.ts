@@ -19,10 +19,15 @@ export interface StreamingOptions {
     debugText?: string;
     cacheSignatures?: boolean;
     displayedThinkingHashes?: Set<string>;
+    watchdogTimeoutMs?: number;
 }
 export interface ThoughtBuffer {
     get(index: number): string | undefined;
     set(index: number, text: string): void;
     clear(): void;
+}
+export declare class StreamIdleTimeoutError extends Error {
+    readonly timeoutMs?: number;
+    constructor(message?: string, timeoutMs?: number);
 }
 //# sourceMappingURL=types.d.ts.map

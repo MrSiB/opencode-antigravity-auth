@@ -1,3 +1,10 @@
+import { Agent, type Dispatcher } from "undici";
+declare global {
+    interface RequestInit {
+        dispatcher?: Dispatcher;
+    }
+}
+export declare const antigravityDispatcher: Agent;
 import { type HeaderStyle } from "../constants";
 import { createStreamingTransformer, transformSseLine, transformStreamingPayload } from "./core/streaming";
 import { type AntigravityDebugContext } from "./debug";

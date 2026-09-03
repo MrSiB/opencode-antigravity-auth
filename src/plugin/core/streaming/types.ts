@@ -23,6 +23,7 @@ export interface StreamingOptions {
   debugText?: string;
   cacheSignatures?: boolean;
   displayedThinkingHashes?: Set<string>;
+  watchdogTimeoutMs?: number;
   // Note: injectSyntheticThinking removed - keep_thinking now unified with debug via debugText
 }
 
@@ -30,4 +31,21 @@ export interface ThoughtBuffer {
   get(index: number): string | undefined;
   set(index: number, text: string): void;
   clear(): void;
+}
+
+export class StreamIdleTimeoutError extends Error {
+  readonly timeoutMs?: number;
+
+  constructor(message?: string, timeoutMs?: number) {
+    super(
+      message ??
+        (timeoutMs !== undefined
+          ? `Stream stalled: no chunks received for ${timeoutMs}ms`
+          : 'Stream stalled: no chunks received within timeout'),
+    );
+    this.name = 'StreamIdleTimeoutError';
+    if (timeoutMs !== undefined) {
+      this.timeoutMs = timeoutMs;
+    }
+  }
 }

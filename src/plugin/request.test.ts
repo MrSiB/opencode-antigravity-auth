@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { Agent } from "undici";
 import {
   prepareAntigravityRequest,
   transformAntigravityResponse,
@@ -9,6 +10,7 @@ import {
   sanitizeAccountEmail,
   getPluginSessionId,
   isGenerativeLanguageRequest,
+  antigravityDispatcher,
   __testExports,
 } from "./request";
 import { DEFAULT_CONFIG } from "./config";

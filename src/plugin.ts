@@ -37,6 +37,7 @@ import {
   sanitizeUrlForLog,
 } from "./plugin/debug";
 import {
+  antigravityDispatcher,
   buildThinkingWarmupBody,
   isGenerativeLanguageRequest,
   prepareAntigravityRequest,
@@ -788,6 +789,7 @@ async function verifyAccountAccess(
       headers,
       body: JSON.stringify(requestBody),
       signal: controller.signal,
+      dispatcher: antigravityDispatcher,
     });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {

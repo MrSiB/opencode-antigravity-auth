@@ -25,4 +25,5 @@ export declare class ToolIdMismatchError extends Error {
     readonly foundIds: string[];
     constructor(expectedIds: string[], foundIds: string[], message?: string);
 }
+export { StreamIdleTimeoutError } from "./core/streaming";
 //# sourceMappingURL=errors.d.ts.map
