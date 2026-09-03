@@ -1177,8 +1177,11 @@ describe("AccountManager", () => {
     });
 
     it("waits for an in-flight save before persisting a revoked-account removal", async () => {
-      const staleSave = Promise.withResolvers<void>();
-      vi.mocked(storageModule.saveAccounts).mockImplementationOnce(async () => staleSave.promise);
+      let resolveStaleSave!: () => void;
+      const staleSavePromise = new Promise<void>((resolve) => {
+        resolveStaleSave = resolve;
+      });
+      vi.mocked(storageModule.saveAccounts).mockImplementationOnce(async () => staleSavePromise);
       vi.mocked(storageModule.removeAccountFromStorage).mockClear();
       const stored: AccountStorageV4 = {
         version: 4,
@@ -1199,7 +1202,7 @@ describe("AccountManager", () => {
       await Promise.resolve();
 
       expect(storageModule.removeAccountFromStorage).not.toHaveBeenCalled();
-      staleSave.resolve();
+      resolveStaleSave();
       await inFlightSave;
       await removal;
       expect(storageModule.removeAccountFromStorage).toHaveBeenCalledWith("revoked");

@@ -116,13 +116,19 @@ describe("API-key fallback credentials", () => {
 
   it("tries every available key when concurrent requests advance the shared cursor", async () => {
     resetAgySdkCredentialStateForTests();
-    const badRequestStarted = Promise.withResolvers<void>();
-    const releaseBadRequest = Promise.withResolvers<void>();
+    let resolveBadRequestStarted!: () => void;
+    const badRequestStartedPromise = new Promise<void>((resolve) => {
+      resolveBadRequestStarted = resolve;
+    });
+    let resolveReleaseBadRequest!: () => void;
+    const releaseBadRequestPromise = new Promise<void>((resolve) => {
+      resolveReleaseBadRequest = resolve;
+    });
     const fetchMock = vi.fn(async (_input: RequestInfo, init?: RequestInit) => {
       const apiKey = new Headers(init?.headers).get("x-goog-api-key");
       if (apiKey === "bad-key") {
-        badRequestStarted.resolve();
-        await releaseBadRequest.promise;
+        resolveBadRequestStarted();
+        await releaseBadRequestPromise;
         return new Response("forbidden", { status: 403 });
       }
       return new Response("ok", { status: 200 });
@@ -140,7 +146,7 @@ describe("API-key fallback credentials", () => {
         credentials,
         60_000,
       );
-      await badRequestStarted.promise;
+      await badRequestStartedPromise;
 
       const secondResponse = await tryFetchWithAgySdkCredentials?.(
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent",
@@ -148,13 +154,13 @@ describe("API-key fallback credentials", () => {
         credentials,
         60_000,
       );
-      releaseBadRequest.resolve();
+      resolveReleaseBadRequest();
       const firstResponse = await firstResponsePromise;
 
       expect(secondResponse?.status).toBe(200);
       expect(firstResponse?.status).toBe(200);
     } finally {
-      releaseBadRequest.resolve();
+      resolveReleaseBadRequest();
       vi.unstubAllGlobals();
     }
   });
