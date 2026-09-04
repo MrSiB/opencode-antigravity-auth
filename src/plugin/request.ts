@@ -11,7 +11,7 @@ declare global {
 
 export const antigravityDispatcher = new Agent({
   connectTimeout: 10_000,
-  headersTimeout: 20_000,
+  headersTimeout: 60_000,
   bodyTimeout: 45_000,
   keepAliveTimeout: 30_000,
 });

@@ -90,9 +90,9 @@ export function detectErrorType(error) {
 export function isRecoverableError(error) {
     return detectErrorType(error) !== null;
 }
-function extractToolUseIds(parts) {
+export function extractToolUseIds(parts) {
     return parts
-        .filter((p) => p.type === "tool_use" && !!p.id)
+        .filter((p) => !!p && typeof p === "object" && p.type === "tool_use" && !!p.id)
         .map((p) => p.id);
 }
 // =============================================================================
@@ -101,16 +101,18 @@ function extractToolUseIds(parts) {
 /**
  * Recover from tool_result_missing error by injecting synthetic tool_result blocks.
  */
-async function recoverToolResultMissing(client, sessionID, failedMsg) {
+export async function recoverToolResultMissing(client, sessionID, failedMsg) {
     // Try API parts first, fallback to filesystem if empty
     let parts = failedMsg.parts || [];
     if (parts.length === 0 && failedMsg.info?.id) {
         const storedParts = readParts(failedMsg.info.id);
-        parts = storedParts.map((p) => ({
+        parts = storedParts
+            .filter((p) => p && typeof p === "object")
+            .map((p) => ({
             type: p.type === "tool" ? "tool_use" : p.type,
-            id: "callID" in p ? p.callID : p.id,
-            name: "tool" in p ? p.tool : undefined,
-            input: "state" in p ? p.state?.input : undefined,
+            id: p && typeof p === "object" && "callID" in p ? p.callID : p.id,
+            name: p && typeof p === "object" && "tool" in p ? p.tool : undefined,
+            input: p && typeof p === "object" && "state" in p ? p.state?.input : undefined,
         }));
     }
     const toolUseIds = extractToolUseIds(parts);
@@ -169,7 +171,7 @@ async function recoverThinkingDisabledViolation(sessionID, _failedMsg) {
     }
     let anySuccess = false;
     for (const messageID of messagesWithThinking) {
-        if (stripThinkingParts(messageID)) {
+        if (stripThinkingParts(messageID, sessionID)) {
             anySuccess = true;
         }
     }
@@ -319,7 +321,7 @@ export function createSessionRecoveryHook(ctx, config) {
             return false;
         processingErrors.add(assistantMsgID);
         try {
-            const failedMsg = msgs?.find((m) => m.info?.id === assistantMsgID);
+            const failedMsg = msgs?.find((m) => m?.info?.id === assistantMsgID);
             if (!failedMsg) {
                 return false;
             }
@@ -369,6 +371,7 @@ export function createSessionRecoveryHook(ctx, config) {
     return {
         handleSessionRecovery,
         isRecoverableError,
+        detectErrorType,
     };
 }
 //# sourceMappingURL=recovery.js.map

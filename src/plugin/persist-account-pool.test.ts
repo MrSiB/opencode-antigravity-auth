@@ -132,12 +132,10 @@ describe("loadAccounts", () => {
       expect(result).toBeNull();
     });
 
-    it("returns null on JSON parse error", async () => {
+    it("throws AccountStorageCorruptedError on JSON parse error when no backup exists", async () => {
       vi.mocked(fs.readFile).mockResolvedValue("{ invalid json }}}");
 
-      const result = await storageModule.loadAccounts();
-
-      expect(result).toBeNull();
+      await expect(storageModule.loadAccounts()).rejects.toThrow(storageModule.AccountStorageCorruptedError);
     });
 
     it("returns null on invalid storage format", async () => {

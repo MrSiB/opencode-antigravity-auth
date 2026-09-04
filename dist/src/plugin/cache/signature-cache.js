@@ -10,22 +10,31 @@
  * Cache key format: `${sessionId}:${modelId}`
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname } from "path";
 import { homedir } from "node:os";
-import { tmpdir } from "node:os";
 import { ensureGitignoreSync } from "../storage.js";
 // =============================================================================
 // Path Utilities
 // =============================================================================
-function getConfigDir() {
-    const platform = process.platform;
-    if (platform === "win32") {
-        return join(process.env.APPDATA || join(homedir(), "AppData", "Roaming"), "opencode");
+export const RENAME_RETRY_DELAY_MS = 50;
+export const RENAME_MAX_RETRIES = 3;
+function sleepSync(ms) {
+    try {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    }
+    catch {
+        const end = Date.now() + ms;
+        while (Date.now() < end) { }
+    }
+}
+export function getConfigDir() {
+    if (process.env.OPENCODE_CONFIG_DIR) {
+        return process.env.OPENCODE_CONFIG_DIR;
     }
     const xdgConfig = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
     return join(xdgConfig, "opencode");
 }
-function getCacheFilePath() {
+export function getCacheFilePath() {
     return join(getConfigDir(), "antigravity-signature-cache.json");
 }
 // =============================================================================
@@ -51,16 +60,19 @@ export class SignatureCache {
         misses: 0,
         writes: 0,
     };
-    constructor(config) {
+    constructor(config, cacheFilePath) {
         this.enabled = config.enabled;
         this.memoryTtlMs = config.memory_ttl_seconds * 1000;
         this.diskTtlMs = config.disk_ttl_seconds * 1000;
         this.writeIntervalMs = config.write_interval_seconds * 1000;
-        this.cacheFilePath = getCacheFilePath();
+        this.cacheFilePath = cacheFilePath || getCacheFilePath();
         if (this.enabled) {
             this.loadFromDisk();
             this.startBackgroundTasks();
         }
+    }
+    getCacheFilePath() {
+        return this.cacheFilePath;
     }
     // ===========================================================================
     // Public API
@@ -228,10 +240,7 @@ export class SignatureCache {
             for (const [key, entry] of Object.entries(data.entries)) {
                 const age = now - entry.timestamp;
                 if (age <= this.diskTtlMs) {
-                    this.cache.set(key, {
-                        value: entry.value,
-                        timestamp: entry.timestamp,
-                    });
+                    this.cache.set(key, { ...entry });
                     loaded++;
                 }
                 else {
@@ -249,13 +258,11 @@ export class SignatureCache {
      * Merges with existing disk entries that haven't expired.
      */
     saveToDisk() {
+        let tmpPath = null;
         try {
-            // Ensure directory exists
-            const dir = dirname(this.cacheFilePath);
-            if (!existsSync(dir)) {
-                mkdirSync(dir, { recursive: true });
-            }
-            ensureGitignoreSync(dir);
+            const cacheDir = dirname(this.cacheFilePath);
+            mkdirSync(cacheDir, { recursive: true });
+            ensureGitignoreSync(cacheDir);
             const now = Date.now();
             // Step 1: Load existing disk entries (if any)
             let existingEntries = {};
@@ -280,10 +287,7 @@ export class SignatureCache {
             // Step 3: Merge - memory entries take precedence
             const mergedEntries = { ...validDiskEntries };
             for (const [key, entry] of this.cache.entries()) {
-                mergedEntries[key] = {
-                    value: entry.value,
-                    timestamp: entry.timestamp,
-                };
+                mergedEntries[key] = { ...entry };
             }
             // Step 4: Build cache data
             const cacheData = {
@@ -300,22 +304,30 @@ export class SignatureCache {
                 },
             };
             // Step 5: Atomic write (temp file + rename)
-            const tmpPath = join(tmpdir(), `antigravity-cache-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
+            tmpPath = join(cacheDir, `antigravity-cache-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
             writeFileSync(tmpPath, JSON.stringify(cacheData, null, 2), "utf-8");
-            try {
-                renameSync(tmpPath, this.cacheFilePath);
-            }
-            catch {
-                // On Windows, rename across volumes may fail
-                // Fall back to copy + delete
-                writeFileSync(this.cacheFilePath, readFileSync(tmpPath));
+            let renamed = false;
+            let lastError;
+            for (let attempt = 0; attempt <= RENAME_MAX_RETRIES; attempt++) {
                 try {
-                    unlinkSync(tmpPath);
+                    renameSync(tmpPath, this.cacheFilePath);
+                    renamed = true;
+                    break;
                 }
-                catch {
-                    // Ignore cleanup errors
+                catch (renameErr) {
+                    lastError = renameErr;
+                    const code = renameErr?.code;
+                    if ((code === "EBUSY" || code === "EPERM") && attempt < RENAME_MAX_RETRIES) {
+                        sleepSync(RENAME_RETRY_DELAY_MS);
+                        continue;
+                    }
+                    break;
                 }
             }
+            if (!renamed) {
+                throw lastError;
+            }
+            tmpPath = null;
             this.stats.writes++;
             this.dirty = false;
             return true;
@@ -323,6 +335,16 @@ export class SignatureCache {
         catch {
             // Silently fail - disk cache is optional
             return false;
+        }
+        finally {
+            if (tmpPath) {
+                try {
+                    unlinkSync(tmpPath);
+                }
+                catch {
+                    // Ignore cleanup errors
+                }
+            }
         }
     }
     // ===========================================================================
@@ -366,10 +388,10 @@ export class SignatureCache {
  * Create a signature cache with the given configuration.
  * Returns null if caching is disabled.
  */
-export function createSignatureCache(config) {
+export function createSignatureCache(config, cacheFilePath) {
     if (!config || !config.enabled) {
         return null;
     }
-    return new SignatureCache(config);
+    return new SignatureCache(config, cacheFilePath);
 }
 //# sourceMappingURL=signature-cache.js.map

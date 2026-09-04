@@ -5,5 +5,7 @@
 export {
   SignatureCache,
   createSignatureCache,
+  getConfigDir,
+  getCacheFilePath,
 } from "./signature-cache";
 export * from "../cache.js";

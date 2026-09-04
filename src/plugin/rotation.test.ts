@@ -1,11 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   HealthScoreTracker,
   TokenBucketTracker,
   selectHybridAccount,
+  calculateHybridScore,
   type AccountWithMetrics,
+  type AccountWithTokens,
 } from "./rotation";
+import { getCanonicalConfigDir } from "./config/paths";
 
 describe("HealthScoreTracker", () => {
   beforeEach(() => {
@@ -505,5 +508,147 @@ describe("selectHybridAccount", () => {
       const result = selectHybridAccount(accounts, tokenTracker);
       expect([0, 1, 2]).toContain(result);
     }
+  });
+});
+
+describe("calculateHybridScore", () => {
+  it("guards against maxTokens = 0 and returns non-negative finite number", () => {
+    const account: AccountWithTokens = {
+      index: 0,
+      lastUsed: Date.now() - 10000,
+      healthScore: 80,
+      isRateLimited: false,
+      isCoolingDown: false,
+      tokens: 25,
+    };
+    const score = calculateHybridScore(account, 0);
+    expect(Number.isFinite(score)).toBe(true);
+    expect(score).toBeGreaterThanOrEqual(0);
+    expect(Number.isNaN(score)).toBe(false);
+  });
+
+  it("guards against tokens = NaN and returns non-negative finite number", () => {
+    const account: AccountWithTokens = {
+      index: 0,
+      lastUsed: Date.now() - 10000,
+      healthScore: 80,
+      isRateLimited: false,
+      isCoolingDown: false,
+      tokens: NaN,
+    };
+    const score = calculateHybridScore(account, 50);
+    expect(Number.isFinite(score)).toBe(true);
+    expect(score).toBeGreaterThanOrEqual(0);
+    expect(Number.isNaN(score)).toBe(false);
+  });
+
+  it("guards against healthScore = NaN and returns non-negative finite number", () => {
+    const account: AccountWithTokens = {
+      index: 0,
+      lastUsed: Date.now() - 10000,
+      healthScore: NaN,
+      isRateLimited: false,
+      isCoolingDown: false,
+      tokens: 40,
+    };
+    const score = calculateHybridScore(account, 50);
+    expect(Number.isFinite(score)).toBe(true);
+    expect(score).toBeGreaterThanOrEqual(0);
+    expect(Number.isNaN(score)).toBe(false);
+  });
+
+  it("guards against future lastUsed (clock drift) and returns non-negative finite number", () => {
+    const account: AccountWithTokens = {
+      index: 0,
+      lastUsed: Date.now() + 600000,
+      healthScore: 70,
+      isRateLimited: false,
+      isCoolingDown: false,
+      tokens: 30,
+    };
+    const score = calculateHybridScore(account, 50);
+    expect(Number.isFinite(score)).toBe(true);
+    expect(score).toBeGreaterThanOrEqual(0);
+    expect(Number.isNaN(score)).toBe(false);
+  });
+
+  it("handles extreme edge case where all inputs are corrupt/NaN/Infinity", () => {
+    const corruptAccount = {
+      index: 0,
+      lastUsed: NaN,
+      healthScore: Infinity,
+      isRateLimited: false,
+      isCoolingDown: false,
+      tokens: -Infinity,
+    } as unknown as AccountWithTokens;
+
+    const score = calculateHybridScore(corruptAccount, -10);
+    expect(Number.isFinite(score)).toBe(true);
+    expect(score).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("clock drift protection", () => {
+  it("HealthScoreTracker clamps hoursSinceUpdate when clock moves backwards", () => {
+    let mockTime = 1000000;
+    vi.spyOn(Date, "now").mockImplementation(() => mockTime);
+
+    const tracker = new HealthScoreTracker({ initial: 70, failurePenalty: -20 });
+    tracker.recordFailure(0);
+    expect(tracker.getScore(0)).toBe(50);
+
+    mockTime = 500000;
+    expect(tracker.getScore(0)).toBe(50);
+
+    vi.restoreAllMocks();
+  });
+
+  it("TokenBucketTracker clamps minutesSinceUpdate when clock moves backwards", () => {
+    let mockTime = 1000000;
+    vi.spyOn(Date, "now").mockImplementation(() => mockTime);
+
+    const tracker = new TokenBucketTracker({ maxTokens: 50, initialTokens: 50 });
+    tracker.consume(0, 10);
+    expect(tracker.getTokens(0)).toBe(40);
+
+    mockTime = 500000;
+    expect(tracker.getTokens(0)).toBe(40);
+
+    vi.restoreAllMocks();
+  });
+});
+
+describe("getCanonicalConfigDir", () => {
+  const originalConfigDir = process.env.OPENCODE_CONFIG_DIR;
+  const originalXdg = process.env.XDG_CONFIG_HOME;
+
+  afterEach(() => {
+    if (originalConfigDir !== undefined) {
+      process.env.OPENCODE_CONFIG_DIR = originalConfigDir;
+    } else {
+      delete process.env.OPENCODE_CONFIG_DIR;
+    }
+    if (originalXdg !== undefined) {
+      process.env.XDG_CONFIG_HOME = originalXdg;
+    } else {
+      delete process.env.XDG_CONFIG_HOME;
+    }
+  });
+
+  it("returns process.env.OPENCODE_CONFIG_DIR when set", () => {
+    process.env.OPENCODE_CONFIG_DIR = "/custom/opencode/dir";
+    expect(getCanonicalConfigDir()).toBe("/custom/opencode/dir");
+  });
+
+  it("falls back to XDG_CONFIG_HOME/opencode when OPENCODE_CONFIG_DIR is unset", () => {
+    delete process.env.OPENCODE_CONFIG_DIR;
+    process.env.XDG_CONFIG_HOME = "/custom/xdg";
+    expect(getCanonicalConfigDir()).toBe("/custom/xdg/opencode");
+  });
+
+  it("falls back to ~/.config/opencode when neither is set", () => {
+    delete process.env.OPENCODE_CONFIG_DIR;
+    delete process.env.XDG_CONFIG_HOME;
+    expect(getCanonicalConfigDir()).toMatch(/\.config[/\\]opencode$/);
   });
 });

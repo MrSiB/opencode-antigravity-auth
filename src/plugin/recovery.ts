@@ -132,9 +132,12 @@ interface ToolUsePart {
   input: Record<string, unknown>;
 }
 
-function extractToolUseIds(parts: MessagePart[]): string[] {
+export function extractToolUseIds(parts: MessagePart[]): string[] {
   return parts
-    .filter((p): p is ToolUsePart & MessagePart => p.type === "tool_use" && !!p.id)
+    .filter(
+      (p): p is ToolUsePart & MessagePart =>
+        !!p && typeof p === "object" && p.type === "tool_use" && !!p.id
+    )
     .map((p) => p.id!);
 }
 
@@ -145,7 +148,7 @@ function extractToolUseIds(parts: MessagePart[]): string[] {
 /**
  * Recover from tool_result_missing error by injecting synthetic tool_result blocks.
  */
-async function recoverToolResultMissing(
+export async function recoverToolResultMissing(
   client: PluginClient,
   sessionID: string,
   failedMsg: MessageData
@@ -154,12 +157,14 @@ async function recoverToolResultMissing(
   let parts = failedMsg.parts || [];
   if (parts.length === 0 && failedMsg.info?.id) {
     const storedParts = readParts(failedMsg.info.id);
-    parts = storedParts.map((p) => ({
-      type: p.type === "tool" ? "tool_use" : p.type,
-      id: "callID" in p ? (p as { callID?: string }).callID : p.id,
-      name: "tool" in p ? (p as { tool?: string }).tool : undefined,
-      input: "state" in p ? (p as { state?: { input?: Record<string, unknown> } }).state?.input : undefined,
-    }));
+    parts = storedParts
+      .filter((p) => p && typeof p === "object")
+      .map((p) => ({
+        type: p.type === "tool" ? "tool_use" : p.type,
+        id: p && typeof p === "object" && "callID" in p ? (p as { callID?: string }).callID : p.id,
+        name: p && typeof p === "object" && "tool" in p ? (p as { tool?: string }).tool : undefined,
+        input: p && typeof p === "object" && "state" in p ? (p as { state?: { input?: Record<string, unknown> } }).state?.input : undefined,
+      }));
   }
 
   const toolUseIds = extractToolUseIds(parts);
@@ -236,7 +241,7 @@ async function recoverThinkingDisabledViolation(
 
   let anySuccess = false;
   for (const messageID of messagesWithThinking) {
-    if (stripThinkingParts(messageID)) {
+    if (stripThinkingParts(messageID, sessionID)) {
       anySuccess = true;
     }
   }
@@ -353,6 +358,11 @@ export interface SessionRecoveryHook {
    * Check if the error is recoverable.
    */
   isRecoverableError: (error: unknown) => boolean;
+
+  /**
+   * Detect the type of recoverable error.
+   */
+  detectErrorType: (error: unknown) => RecoveryErrorType;
 }
 
 export interface SessionRecoveryContext {
@@ -441,7 +451,7 @@ export function createSessionRecoveryHook(
     processingErrors.add(assistantMsgID);
 
     try {
-      const failedMsg = msgs?.find((m) => m.info?.id === assistantMsgID);
+      const failedMsg = msgs?.find((m) => m?.info?.id === assistantMsgID);
       if (!failedMsg) {
         return false;
       }
@@ -492,5 +502,6 @@ export function createSessionRecoveryHook(
   return {
     handleSessionRecovery,
     isRecoverableError,
+    detectErrorType,
   };
 }

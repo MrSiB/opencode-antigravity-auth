@@ -130,6 +130,11 @@ export interface AccountStorageV4 {
         gemini?: number;
     };
 }
+export declare class AccountStorageCorruptedError extends Error {
+    readonly path?: string;
+    readonly cause?: unknown;
+    constructor(message: string, pathOrCause?: string | unknown, cause?: unknown);
+}
 /**
  * Gets the config directory path, with the following precedence:
  * 1. OPENCODE_CONFIG_DIR env var (if set)
@@ -158,7 +163,7 @@ export declare function deduplicateAccountsByEmail<T extends {
 }>(accounts: T[]): T[];
 export declare function migrateV2ToV3(v2: AccountStorage): AccountStorageV3;
 export declare function migrateV3ToV4(v3: AccountStorageV3): AccountStorageV4;
-export declare function loadAccounts(): Promise<AccountStorageV4 | null>;
+export declare function loadAccounts(path?: string): Promise<AccountStorageV4 | null>;
 export declare function saveAccounts(storage: AccountStorageV4): Promise<void>;
 /**
  * Save accounts storage by replacing the entire file (no merge).
@@ -167,5 +172,10 @@ export declare function saveAccounts(storage: AccountStorageV4): Promise<void>;
  */
 export declare function saveAccountsReplace(storage: AccountStorageV4): Promise<void>;
 export declare function removeAccountFromStorage(refreshToken: string): Promise<void>;
+export declare const sleep: (ms: number) => Promise<void>;
+export declare const delay: (ms: number) => Promise<void>;
+export declare const RENAME_RETRY_DELAYS_MS: readonly [50, 100, 150, 200, 250];
+export declare function writeAccountsAtomically(path: string, storage: AccountStorageV4): Promise<void>;
+export declare function loadAccountsUnsafe(path?: string): Promise<AccountStorageV4 | null>;
 export declare function clearAccounts(): Promise<void>;
 //# sourceMappingURL=storage.d.ts.map

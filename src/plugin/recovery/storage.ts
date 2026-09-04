@@ -60,7 +60,10 @@ export function readMessages(sessionID: string): StoredMessageMeta[] {
       if (!file.endsWith(".json")) continue;
       try {
         const content = readFileSync(join(messageDir, file), "utf-8");
-        messages.push(JSON.parse(content));
+        const parsed = JSON.parse(content);
+        if (parsed && typeof parsed === "object") {
+          messages.push(parsed as StoredMessageMeta);
+        }
       } catch {
         continue;
       }
@@ -70,10 +73,10 @@ export function readMessages(sessionID: string): StoredMessageMeta[] {
   }
 
   return messages.sort((a, b) => {
-    const aTime = a.time?.created ?? 0;
-    const bTime = b.time?.created ?? 0;
+    const aTime = a?.time?.created ?? 0;
+    const bTime = b?.time?.created ?? 0;
     if (aTime !== bTime) return aTime - bTime;
-    return (a.id ?? "").localeCompare(b.id ?? "");
+    return (a?.id ?? "").localeCompare(b?.id ?? "");
   });
 }
 
@@ -91,7 +94,10 @@ export function readParts(messageID: string): StoredPart[] {
       if (!file.endsWith(".json")) continue;
       try {
         const content = readFileSync(join(partDir, file), "utf-8");
-        parts.push(JSON.parse(content));
+        const parsed = JSON.parse(content);
+        if (parsed && typeof parsed === "object") {
+          parts.push(parsed as StoredPart);
+        }
       } catch {
         continue;
       }
@@ -108,6 +114,7 @@ export function readParts(messageID: string): StoredPart[] {
 // =============================================================================
 
 export function hasContent(part: StoredPart): boolean {
+  if (!part || typeof part !== "object") return false;
   if (THINKING_TYPES.has(part.type)) return false;
   if (META_TYPES.has(part.type)) return false;
 
@@ -127,7 +134,10 @@ export function hasContent(part: StoredPart): boolean {
   return false;
 }
 
-export function messageHasContent(messageID: string): boolean {
+export function messageHasContent(messageID: string): boolean;
+export function messageHasContent(sessionID: string, messageID: string): boolean;
+export function messageHasContent(arg1: string, arg2?: string): boolean {
+  const messageID = arg2 !== undefined ? arg2 : arg1;
   const parts = readParts(messageID);
   return parts.some(hasContent);
 }
@@ -170,10 +180,10 @@ export function findMessagesWithThinkingBlocks(sessionID: string): string[] {
   const result: string[] = [];
 
   for (const msg of messages) {
-    if (msg.role !== "assistant") continue;
+    if (!msg || typeof msg !== "object" || msg.role !== "assistant" || !msg.id) continue;
 
     const parts = readParts(msg.id);
-    const hasThinking = parts.some((p) => THINKING_TYPES.has(p.type));
+    const hasThinking = parts.some((p) => p && typeof p === "object" && THINKING_TYPES.has(p.type));
     if (hasThinking) {
       result.push(msg.id);
     }
@@ -187,12 +197,12 @@ export function findMessagesWithThinkingOnly(sessionID: string): string[] {
   const result: string[] = [];
 
   for (const msg of messages) {
-    if (msg.role !== "assistant") continue;
+    if (!msg || typeof msg !== "object" || msg.role !== "assistant" || !msg.id) continue;
 
     const parts = readParts(msg.id);
     if (parts.length === 0) continue;
 
-    const hasThinking = parts.some((p) => THINKING_TYPES.has(p.type));
+    const hasThinking = parts.some((p) => p && typeof p === "object" && THINKING_TYPES.has(p.type));
     const hasTextContent = parts.some(hasContent);
 
     // Has thinking but no text content = orphan thinking
@@ -210,18 +220,25 @@ export function findMessagesWithOrphanThinking(sessionID: string): string[] {
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
-    if (!msg || msg.role !== "assistant") continue;
+    if (!msg || typeof msg !== "object" || msg.role !== "assistant" || !msg.id) continue;
 
     const parts = readParts(msg.id);
     if (parts.length === 0) continue;
 
-    const sortedParts = [...parts].sort((a, b) => (a.id ?? "").localeCompare(b.id ?? ""));
+    const hasThinking = parts.some((p) => p && typeof p === "object" && THINKING_TYPES.has(p.type));
+    if (!hasThinking) continue;
+
+    const contentParts = parts.filter(
+      (p) => p && typeof p === "object" && !META_TYPES.has(p.type)
+    );
+    if (contentParts.length === 0) continue;
+
+    const sortedParts = [...contentParts].sort((a, b) => (a?.id ?? "").localeCompare(b?.id ?? ""));
     const firstPart = sortedParts[0];
     if (!firstPart) continue;
 
     const firstIsThinking = THINKING_TYPES.has(firstPart.type);
 
-    // If first part is not thinking, it's orphan
     if (!firstIsThinking) {
       result.push(msg.id);
     }
@@ -255,11 +272,13 @@ export function prependThinkingPart(sessionID: string, messageID: string): boole
   }
 }
 
-export function stripThinkingParts(messageID: string): boolean {
+export function stripThinkingParts(messageID: string, sessionID?: string): boolean {
   const partDir = join(PART_STORAGE, messageID);
   if (!existsSync(partDir)) return false;
 
   let anyRemoved = false;
+  let discoveredSessionID = sessionID;
+
   try {
     for (const file of readdirSync(partDir)) {
       if (!file.endsWith(".json")) continue;
@@ -267,12 +286,25 @@ export function stripThinkingParts(messageID: string): boolean {
         const filePath = join(partDir, file);
         const content = readFileSync(filePath, "utf-8");
         const part = JSON.parse(content) as StoredPart;
+        if (!part || typeof part !== "object") continue;
+
+        if (part.sessionID && !discoveredSessionID) {
+          discoveredSessionID = part.sessionID;
+        }
+
         if (THINKING_TYPES.has(part.type)) {
           unlinkSync(filePath);
           anyRemoved = true;
         }
       } catch {
         continue;
+      }
+    }
+
+    if (anyRemoved) {
+      const sID = discoveredSessionID || "";
+      if (!messageHasContent(sID, messageID)) {
+        injectTextPart(sID, messageID, "[Thinking stripped]");
       }
     }
   } catch {
@@ -291,7 +323,8 @@ export function findEmptyMessages(sessionID: string): string[] {
   const emptyIds: string[] = [];
 
   for (const msg of messages) {
-    if (!messageHasContent(msg.id)) {
+    if (!msg || typeof msg !== "object" || !msg.id) continue;
+    if (!messageHasContent(sessionID, msg.id)) {
       emptyIds.push(msg.id);
     }
   }
@@ -309,9 +342,9 @@ export function findEmptyMessageByIndex(sessionID: string, targetIndex: number):
     if (idx < 0 || idx >= messages.length) continue;
 
     const targetMsg = messages[idx];
-    if (!targetMsg) continue;
+    if (!targetMsg || typeof targetMsg !== "object" || !targetMsg.id) continue;
 
-    if (!messageHasContent(targetMsg.id)) {
+    if (!messageHasContent(sessionID, targetMsg.id)) {
       return targetMsg.id;
     }
   }
@@ -325,12 +358,17 @@ export function findMessageByIndexNeedingThinking(sessionID: string, targetIndex
   if (targetIndex < 0 || targetIndex >= messages.length) return null;
 
   const targetMsg = messages[targetIndex];
-  if (!targetMsg || targetMsg.role !== "assistant") return null;
+  if (!targetMsg || typeof targetMsg !== "object" || targetMsg.role !== "assistant" || !targetMsg.id) return null;
 
   const parts = readParts(targetMsg.id);
   if (parts.length === 0) return null;
 
-  const sortedParts = [...parts].sort((a, b) => (a.id ?? "").localeCompare(b.id ?? ""));
+  const contentParts = parts.filter(
+    (p) => p && typeof p === "object" && !META_TYPES.has(p.type)
+  );
+  if (contentParts.length === 0) return null;
+
+  const sortedParts = [...contentParts].sort((a, b) => (a?.id ?? "").localeCompare(b?.id ?? ""));
   const firstPart = sortedParts[0];
   if (!firstPart) return null;
 
@@ -355,6 +393,7 @@ export function replaceEmptyTextParts(messageID: string, replacementText: string
         const filePath = join(partDir, file);
         const content = readFileSync(filePath, "utf-8");
         const part = JSON.parse(content) as StoredPart;
+        if (!part || typeof part !== "object") continue;
 
         if (part.type === "text") {
           const textPart = part as StoredTextPart;
@@ -381,8 +420,10 @@ export function findMessagesWithEmptyTextParts(sessionID: string): string[] {
   const result: string[] = [];
 
   for (const msg of messages) {
+    if (!msg || typeof msg !== "object" || !msg.id) continue;
     const parts = readParts(msg.id);
     const hasEmptyTextPart = parts.some((p) => {
+      if (!p || typeof p !== "object") return false;
       if (p.type !== "text") return false;
       const textPart = p as StoredTextPart;
       return !textPart.text?.trim();

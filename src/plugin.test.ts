@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { PluginClient } from "./plugin/types";
+import type { VerificationStoredAccount } from "./plugin";
 import { AccountManager } from "./plugin/accounts";
 import { DEFAULT_CONFIG } from "./plugin/config";
 
@@ -34,8 +35,17 @@ vi.mock("./plugin/storage", async (importOriginal) => {
   };
 });
 
-const { createAntigravityPlugin, loopEscapeTestHooks, __testExports } = await import("./plugin");
+vi.mock("./plugin/recovery", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./plugin/recovery")>();
+  return {
+    ...original,
+    createSessionRecoveryHook: vi.fn(original.createSessionRecoveryHook),
+  };
+});
+
+const { createAntigravityPlugin, loopEscapeTestHooks, __testExports, markStoredAccountVerificationRequired } = await import("./plugin");
 const storageModule = await import("./plugin/storage");
+const recoveryModule = await import("./plugin/recovery");
 const { resetPublicGeminiApiModelCatalogForTests } = await import("./plugin/model-catalog");
 const { resetAgySdkCredentialStateForTests } = await import("./plugin/api-key");
 
@@ -50,6 +60,7 @@ const client = {
 // into another test's agy-sdk routing assertions.
 afterEach(() => {
   resetPublicGeminiApiModelCatalogForTests();
+  vi.mocked(recoveryModule.createSessionRecoveryHook).mockClear();
 });
 
 describe("Gemini Flash-Lite routing", () => {
@@ -595,6 +606,83 @@ describe("createAntigravityPlugin auth.loader disk OAuth promotion", () => {
       // wipe OpenCode's api-key auth for the google provider.
       expect(authSetSpy).not.toHaveBeenCalled();
       expect(storageModule.removeAccountFromStorage).toHaveBeenCalledWith("fake-refresh-token");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does NOT wipe OAuth credentials when active account hits invalid_grant but disabled account remains", async () => {
+    vi.mocked(storageModule.loadAccounts).mockResolvedValue({
+      version: 4,
+      accounts: [
+        {
+          email: "active@example.com",
+          refreshToken: "revoked-token",
+          projectId: "project-1",
+          addedAt: 0,
+          lastUsed: 0,
+          enabled: true,
+        },
+        {
+          email: "disabled@example.com",
+          refreshToken: "disabled-token",
+          projectId: "project-2",
+          addedAt: 0,
+          lastUsed: 0,
+          enabled: false,
+        },
+      ],
+      activeIndex: 0,
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo) => {
+      const url = String(input);
+      if (url.includes("oauth2.googleapis.com")) {
+        return new Response(
+          JSON.stringify({ error: "invalid_grant", error_description: "test-revoked" }),
+          { status: 400, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("generativelanguage.googleapis.com")) {
+        return new Response(JSON.stringify({ models: [] }));
+      }
+      return new Response("1.2.3");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const authSetSpy = vi.fn(async () => undefined);
+    const localClient = {
+      tui: { showToast: vi.fn(async () => undefined) },
+      app: { log: vi.fn(async () => undefined) },
+      auth: { set: authSetSpy },
+    } as unknown as PluginClient;
+
+    try {
+      const plugin = await createAntigravityPlugin("google")({
+        client: localClient,
+        directory: process.cwd(),
+      });
+
+      const loader = await plugin.auth.loader(
+        async () => ({ type: "oauth", refresh: "revoked-token", access: "acc", expires: Date.now() + 1000 }),
+        {
+          id: "google",
+          api: "https://generativelanguage.googleapis.com/v1beta",
+          npm: "@ai-sdk/google",
+          models: {},
+        },
+      );
+
+      try {
+        await (loader as { fetch: typeof fetch }).fetch(
+          "https://generativelanguage.googleapis.com/v1beta/models/antigravity-gemini-3.1-pro:generateContent",
+          { method: "POST", body: "{}" },
+        );
+      } catch {
+      }
+
+      expect(storageModule.removeAccountFromStorage).toHaveBeenCalledWith("revoked-token");
+      expect(authSetSpy).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
     }
@@ -1249,4 +1337,325 @@ describe("createAntigravityPlugin capacity-exhaustion header-style fallback (rev
   it("capacity-exhausted both pools + transient SDK 500 rotates to the healthy second account", async () => {
     await runCapacitySdkRetryableRotation(500, "Internal server error");
   }, 20_000);
+});
+
+describe("Last Survivor Rule in markStoredAccountVerificationRequired and storage", () => {
+  const markRequired =
+    __testExports.markStoredAccountVerificationRequired ??
+    markStoredAccountVerificationRequired;
+
+  it("markStoredAccountVerificationRequired: when remainingEnabledCount <= 1, keeps account.enabled = true", () => {
+    const account: VerificationStoredAccount = {
+      enabled: true,
+      verificationRequired: false,
+    };
+
+    const changed = markRequired(
+      account,
+      "Google requires account verification.",
+      "https://accounts.google.com/verify",
+      1,
+    );
+
+    expect(changed).toBe(true);
+    expect(account.enabled).toBe(true);
+    expect(account.verificationRequired).toBe(true);
+    expect(account.verificationRequiredReason).toBe("Google requires account verification.");
+    expect(account.verificationUrl).toBe("https://accounts.google.com/verify");
+    expect(typeof account.verificationRequiredAt).toBe("number");
+  });
+
+  it("markStoredAccountVerificationRequired: when remainingEnabledCount is 0, keeps account enabled", () => {
+    const account: VerificationStoredAccount = {
+      enabled: true,
+    };
+
+    const changed = markRequired(account, "Needs verification", undefined, 0);
+
+    expect(changed).toBe(true);
+    expect(account.enabled).toBe(true);
+    expect(account.verificationRequired).toBe(true);
+    expect(account.verificationRequiredReason).toBe("Needs verification");
+  });
+
+  it("markStoredAccountVerificationRequired: when remainingEnabledCount > 1, sets account.enabled = false", () => {
+    const account: VerificationStoredAccount = {
+      enabled: true,
+      verificationRequired: false,
+    };
+
+    const changed = markRequired(
+      account,
+      "Google requires account verification.",
+      "https://accounts.google.com/verify",
+      2,
+    );
+
+    expect(changed).toBe(true);
+    expect(account.enabled).toBe(false);
+    expect(account.verificationRequired).toBe(true);
+    expect(account.verificationRequiredReason).toBe("Google requires account verification.");
+    expect(account.verificationUrl).toBe("https://accounts.google.com/verify");
+    expect(typeof account.verificationRequiredAt).toBe("number");
+  });
+
+  it("markStoredAccountVerificationRequired: when remainingEnabledCount is undefined, defaults to setting enabled = false (backward compatibility)", () => {
+    const account: VerificationStoredAccount = {
+      enabled: true,
+    };
+
+    const changed = markRequired(account, "Google verification");
+
+    expect(changed).toBe(true);
+    expect(account.enabled).toBe(false);
+    expect(account.verificationRequired).toBe(true);
+  });
+
+  it("preserves Last Survivor in storage when batch-verifying multiple accounts that all need verification", () => {
+    const existingStorage: {
+      version: number;
+      activeIndex: number;
+      accounts: VerificationStoredAccount[];
+    } = {
+      version: 4,
+      activeIndex: 0,
+      accounts: [
+        { enabled: true },
+        { enabled: true },
+        { enabled: true },
+      ],
+    };
+
+    for (let i = 0; i < existingStorage.accounts.length; i++) {
+      const account = existingStorage.accounts[i]!;
+      const enabledCount = existingStorage.accounts.filter((a) => a.enabled !== false).length;
+      markRequired(account, "Google verification", undefined, enabledCount);
+    }
+
+    expect(existingStorage.accounts[0]!.enabled).toBe(false);
+    expect(existingStorage.accounts[1]!.enabled).toBe(false);
+    expect(existingStorage.accounts[2]!.enabled).toBe(true);
+
+    const remainingEnabled = existingStorage.accounts.filter((a) => a.enabled !== false);
+    expect(remainingEnabled).toHaveLength(1);
+    expect(remainingEnabled[0]).toBe(existingStorage.accounts[2]);
+  });
+
+  it("preserves Last Survivor in storage when single account needs verification", () => {
+    const existingStorage: {
+      version: number;
+      activeIndex: number;
+      accounts: VerificationStoredAccount[];
+    } = {
+      version: 4,
+      activeIndex: 0,
+      accounts: [
+        { enabled: true },
+      ],
+    };
+
+    const account = existingStorage.accounts[0]!;
+    const enabledCount = existingStorage.accounts.filter((a) => a.enabled !== false).length;
+    expect(enabledCount).toBe(1);
+
+    markRequired(account, "Google verification", undefined, enabledCount);
+
+    expect(account.enabled).toBe(true);
+    expect(account.verificationRequired).toBe(true);
+    expect(existingStorage.accounts.filter((a) => a.enabled !== false)).toHaveLength(1);
+  });
+
+  it("CLI toggle Last Survivor check: prevents disabling the sole enabled account in storage", () => {
+    const existingStorage = {
+      version: 4,
+      activeIndex: 0,
+      accounts: [
+        { email: "acc1@example.com", refreshToken: "r1", enabled: true },
+        { email: "acc2@example.com", refreshToken: "r2", enabled: false },
+      ],
+    };
+
+    const acc = existingStorage.accounts[0]!;
+    let disablePrevented = false;
+    let warningMessage = "";
+
+    if (acc.enabled !== false) {
+      const enabledCount = existingStorage.accounts.filter((a) => a.enabled !== false).length;
+      if (enabledCount <= 1) {
+        disablePrevented = true;
+        warningMessage = "Cannot disable account: at least one account must remain enabled (Last Survivor Rule).";
+      }
+    }
+
+    expect(disablePrevented).toBe(true);
+    expect(warningMessage).toContain("Cannot disable account: at least one account must remain enabled (Last Survivor Rule).");
+    expect(acc.enabled).toBe(true);
+  });
+});
+
+describe("eventHandler session recovery auto_resume guard", { timeout: 15000 }, () => {
+  it("does not call client.session.prompt when recovered is true and errorType is thinking_block_order", async () => {
+    const mockPrompt = vi.fn().mockResolvedValue({});
+    const mockShowToast = vi.fn().mockResolvedValue({});
+    const testClient = {
+      tui: { showToast: mockShowToast },
+      app: { log: vi.fn(async () => undefined) },
+      session: { prompt: mockPrompt },
+    } as unknown as PluginClient;
+
+    vi.mocked(recoveryModule.createSessionRecoveryHook).mockReturnValue({
+      isRecoverableError: vi.fn().mockReturnValue(true),
+      handleSessionRecovery: vi.fn().mockResolvedValue(true),
+      detectErrorType: vi.fn().mockReturnValue("thinking_block_order"),
+    });
+
+    const plugin = await createAntigravityPlugin("google")({
+      client: testClient,
+      directory: "/test/dir",
+    });
+
+    await (plugin.event as ((input: unknown) => Promise<void>) | undefined)?.({
+      event: {
+        type: "session.error",
+        properties: {
+          sessionID: "ses_thinking_test",
+          messageID: "msg_thinking_test",
+          error: new Error("thinking must be the first block in the message"),
+        },
+      },
+    });
+
+    expect(mockPrompt).not.toHaveBeenCalled();
+    expect(mockShowToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          variant: "success",
+          title: "Session Recovered",
+        }),
+      }),
+    );
+  });
+
+  it("calls client.session.prompt with config.resume_text when recovered is true and errorType is tool_result_missing", async () => {
+    const mockPrompt = vi.fn().mockResolvedValue({});
+    const mockShowToast = vi.fn().mockResolvedValue({});
+    const testClient = {
+      tui: { showToast: mockShowToast },
+      app: { log: vi.fn(async () => undefined) },
+      session: { prompt: mockPrompt },
+    } as unknown as PluginClient;
+
+    vi.mocked(recoveryModule.createSessionRecoveryHook).mockReturnValue({
+      isRecoverableError: vi.fn().mockReturnValue(true),
+      handleSessionRecovery: vi.fn().mockResolvedValue(true),
+      detectErrorType: vi.fn().mockReturnValue("tool_result_missing"),
+    });
+
+    const plugin = await createAntigravityPlugin("google")({
+      client: testClient,
+      directory: "/test/dir",
+    });
+
+    await (plugin.event as ((input: unknown) => Promise<void>) | undefined)?.({
+      event: {
+        type: "session.error",
+        properties: {
+          sessionID: "ses_tool_test",
+          messageID: "msg_tool_test",
+          error: new Error("tool_use ids were found without tool_result blocks"),
+        },
+      },
+    });
+
+    expect(mockPrompt).toHaveBeenCalledTimes(1);
+    expect(mockPrompt).toHaveBeenCalledWith({
+      path: { id: "ses_tool_test" },
+      body: { parts: [{ type: "text", text: DEFAULT_CONFIG.resume_text }] },
+      query: { directory: "/test/dir" },
+    });
+    expect(mockShowToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          variant: "success",
+          title: "Session Recovered",
+        }),
+      }),
+    );
+  });
+
+  it("does not call client.session.prompt when errorType is thinking_disabled_violation", async () => {
+    const mockPrompt = vi.fn().mockResolvedValue({});
+    const mockShowToast = vi.fn().mockResolvedValue({});
+    const testClient = {
+      tui: { showToast: mockShowToast },
+      app: { log: vi.fn(async () => undefined) },
+      session: { prompt: mockPrompt },
+    } as unknown as PluginClient;
+
+    vi.mocked(recoveryModule.createSessionRecoveryHook).mockReturnValue({
+      isRecoverableError: vi.fn().mockReturnValue(true),
+      handleSessionRecovery: vi.fn().mockResolvedValue(true),
+      detectErrorType: vi.fn().mockReturnValue("thinking_disabled_violation"),
+    });
+
+    const plugin = await createAntigravityPlugin("google")({
+      client: testClient,
+      directory: "/test/dir",
+    });
+
+    await (plugin.event as ((input: unknown) => Promise<void>) | undefined)?.({
+      event: {
+        type: "session.error",
+        properties: {
+          sessionID: "ses_thinking_disabled_test",
+          messageID: "msg_thinking_disabled_test",
+          error: new Error("thinking is disabled and cannot contain thinking blocks"),
+        },
+      },
+    });
+
+    expect(mockPrompt).not.toHaveBeenCalled();
+    expect(mockShowToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          variant: "success",
+        }),
+      }),
+    );
+  });
+
+  it("does not call client.session.prompt or show toast when recovery fails (recovered is false)", async () => {
+    const mockPrompt = vi.fn().mockResolvedValue({});
+    const mockShowToast = vi.fn().mockResolvedValue({});
+    const testClient = {
+      tui: { showToast: mockShowToast },
+      app: { log: vi.fn(async () => undefined) },
+      session: { prompt: mockPrompt },
+    } as unknown as PluginClient;
+
+    vi.mocked(recoveryModule.createSessionRecoveryHook).mockReturnValue({
+      isRecoverableError: vi.fn().mockReturnValue(true),
+      handleSessionRecovery: vi.fn().mockResolvedValue(false),
+      detectErrorType: vi.fn().mockReturnValue("tool_result_missing"),
+    });
+
+    const plugin = await createAntigravityPlugin("google")({
+      client: testClient,
+      directory: "/test/dir",
+    });
+
+    await (plugin.event as ((input: unknown) => Promise<void>) | undefined)?.({
+      event: {
+        type: "session.error",
+        properties: {
+          sessionID: "ses_failed_test",
+          messageID: "msg_failed_test",
+          error: new Error("tool_use ids were found without tool_result blocks"),
+        },
+      },
+    });
+
+    expect(mockPrompt).not.toHaveBeenCalled();
+    expect(mockShowToast).not.toHaveBeenCalled();
+  });
 });

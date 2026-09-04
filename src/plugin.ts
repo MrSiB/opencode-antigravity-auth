@@ -877,10 +877,13 @@ type VerificationStoredAccount = {
   verificationUrl?: string;
 };
 
-function markStoredAccountVerificationRequired(
+export type { VerificationStoredAccount };
+
+export function markStoredAccountVerificationRequired(
   account: VerificationStoredAccount,
   reason: string,
   verifyUrl?: string,
+  remainingEnabledCount?: number,
 ): boolean {
   let changed = false;
   const wasVerificationRequired = account.verificationRequired === true;
@@ -907,9 +910,12 @@ function markStoredAccountVerificationRequired(
     changed = true;
   }
 
-  if (account.enabled !== false) {
-    account.enabled = false;
-    changed = true;
+  const isLastSurvivor = remainingEnabledCount !== undefined && remainingEnabledCount <= 1;
+  if (!isLastSurvivor) {
+    if (account.enabled !== false) {
+      account.enabled = false;
+      changed = true;
+    }
   }
 
   return changed;
@@ -1726,17 +1732,21 @@ export const createAntigravityPlugin = (providerId: string) => async (
         // handleSessionRecovery now does the actual fix (injects tool_result, etc.)
         const recovered = await sessionRecovery.handleSessionRecovery(messageInfo);
 
+        const errorType = sessionRecovery.detectErrorType(error);
+
         // Only send "continue" AFTER successful tool_result_missing recovery
         // (thinking recoveries already resume inside handleSessionRecovery)
-        if (recovered && sessionID && config.auto_resume) {
+        if (recovered && sessionID && config.auto_resume && errorType === "tool_result_missing") {
           // For tool_result_missing, we need to send continue after injecting tool_results
           await client.session.prompt({
             path: { id: sessionID },
             body: { parts: [{ type: "text", text: config.resume_text }] },
             query: { directory },
           }).catch(() => {});
-          
-          // Show success toast (respects toast_scope for child sessions)
+        }
+
+        // Show success toast (respects toast_scope for child sessions)
+        if (recovered) {
           const successToast = getRecoverySuccessToast();
           log.debug("recovery-toast", { ...successToast, isChildSession, toastScope: config.toast_scope });
           if (!(config.toast_scope === "root_only" && isChildSession)) {
@@ -2409,7 +2419,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     }
                   }
 
-                  if (accountManager.getAccountCount() === 0) {
+                  if (accountManager.getTotalAccountCount() === 0) {
                     // Only clear OpenCode's stored OAuth credentials when OpenCode
                     // was actually in OAuth mode at loader time. If we promoted
                     // OAuth from disk over an API-key auth, OpenCode's provider
@@ -3072,7 +3082,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   response.status >= 500
                 );
 
-                if (shouldRetryEndpoint && i < ANTIGRAVITY_ENDPOINT_FALLBACKS.length - 1) {
+                if (shouldRetryEndpoint && hasUsableEndpointAfterIndex(i, headerStyle)) {
                   await logResponseBody(debugContext, response, response.status);
                   lastFailure = createFailureContext(response);
                   continue;
@@ -3289,7 +3299,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   });
                 }
 
-                if (i < ANTIGRAVITY_ENDPOINT_FALLBACKS.length - 1) {
+                if (hasUsableEndpointAfterIndex(i, headerStyle)) {
                   lastError = error instanceof Error ? error : new Error(String(error));
                   continue;
                 }
@@ -3582,6 +3592,14 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   if (menuResult.toggleAccountIndex !== undefined) {
                     const acc = existingStorage.accounts[menuResult.toggleAccountIndex];
                     if (acc) {
+                      if (acc.enabled !== false) {
+                        const enabledCount = existingStorage.accounts.filter((a) => a.enabled !== false).length;
+                        if (enabledCount <= 1) {
+                          console.log("\nCannot disable account: at least one account must remain enabled (Last Survivor Rule).\n");
+                          await pressEnterToContinue();
+                          continue;
+                        }
+                      }
                       acc.enabled = acc.enabled === false;
                       await saveAccounts(existingStorage);
                       activeAccountManager?.setAccountEnabled(menuResult.toggleAccountIndex, acc.enabled);
@@ -3631,10 +3649,13 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       }
 
                       if (verification.status === "blocked") {
+                        const enabledCount = existingStorage.accounts.filter((a) => a.enabled !== false).length;
+                        const isLastSurvivor = account.enabled !== false && enabledCount <= 1;
                         const changed = markStoredAccountVerificationRequired(
                           account,
                           verification.message,
                           verification.verifyUrl,
+                          enabledCount,
                         );
                         if (changed) {
                           storageUpdated = true;
@@ -3642,10 +3663,14 @@ export const createAntigravityPlugin = (providerId: string) => async (
                         activeAccountManager?.markAccountVerificationRequired(i, verification.message, verification.verifyUrl);
 
                         blockedCount += 1;
-                        console.log("needs verification");
+                        if (isLastSurvivor) {
+                          console.log("needs verification (remains enabled under Last Survivor Rule)");
+                        } else {
+                          console.log("needs verification");
+                        }
                         const verifyUrl = verification.verifyUrl ?? account.verificationUrl;
                         blockedResults.push({
-                          label,
+                          label: isLastSurvivor ? `${label} (Last Survivor - remains enabled)` : label,
                           message: verification.message,
                           verifyUrl,
                         });
@@ -3722,10 +3747,13 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   }
 
                   if (verification.status === "blocked") {
+                    const enabledCount = existingStorage.accounts.filter((a) => a.enabled !== false).length;
+                    const isLastSurvivor = account.enabled !== false && enabledCount <= 1;
                     const changed = markStoredAccountVerificationRequired(
                       account,
                       verification.message,
                       verification.verifyUrl,
+                      enabledCount,
                     );
                     if (changed) {
                       await saveAccounts(existingStorage);
@@ -3741,7 +3769,11 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     if (verification.message) {
                       console.log(verification.message);
                     }
-                    console.log(`${label} has been disabled until verification is completed.`);
+                    if (isLastSurvivor) {
+                      console.log(`${label} remains enabled under the Last Survivor Rule.`);
+                    } else {
+                      console.log(`${label} has been disabled until verification is completed.`);
+                    }
                     if (verifyUrl) {
                       console.log(`\nVerification URL:\n${verifyUrl}\n`);
                       if (await promptOpenVerificationUrl()) {
@@ -4355,4 +4387,6 @@ export const __testExports = {
   verifyAccountAccess,
   resolveHeaderRoutingDecision,
   resolveQuotaFallbackHeaderStyle,
+  markStoredAccountVerificationRequired,
+  clearStoredAccountVerificationRequired,
 };

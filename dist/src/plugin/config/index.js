@@ -13,4 +13,5 @@
  */
 export { AntigravityConfigSchema, SignatureCacheConfigSchema, DEFAULT_CONFIG, } from "./schema.js";
 export { loadConfig, getUserConfigPath, getProjectConfigPath, getDefaultLogsDir, configExists, initRuntimeConfig, getKeepThinking, } from "./loader.js";
+export { getCanonicalConfigDir } from "./paths.js";
 //# sourceMappingURL=index.js.map

@@ -97,6 +97,10 @@ export interface AccountWithMetrics {
  * @returns Best account index, or null if none available
  */
 export declare function selectHybridAccount(accounts: AccountWithMetrics[], tokenTracker: TokenBucketTracker, currentAccountIndex?: number | null, minHealthScore?: number): number | null;
+export interface AccountWithTokens extends AccountWithMetrics {
+    tokens: number;
+}
+export declare function calculateHybridScore(account: AccountWithTokens, maxTokens: number): number;
 export interface TokenBucketConfig {
     /** Maximum tokens per account (default: 50) */
     maxTokens: number;

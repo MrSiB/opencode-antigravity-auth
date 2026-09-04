@@ -19,6 +19,19 @@ declare function verifyAccountAccess(account: {
     projectId?: string;
     managedProjectId?: string;
 }, client: PluginClient, providerId: string): Promise<VerificationProbeResult>;
+type VerificationStoredAccount = {
+    enabled?: boolean;
+    verificationRequired?: boolean;
+    verificationRequiredAt?: number;
+    verificationRequiredReason?: string;
+    verificationUrl?: string;
+};
+export type { VerificationStoredAccount };
+export declare function markStoredAccountVerificationRequired(account: VerificationStoredAccount, reason: string, verifyUrl?: string, remainingEnabledCount?: number): boolean;
+declare function clearStoredAccountVerificationRequired(account: VerificationStoredAccount, enableIfRequired?: boolean): {
+    changed: boolean;
+    wasVerificationRequired: boolean;
+};
 declare function createSoftQuotaBlockedResponse(input: {
     accountCount: number;
     family: ModelFamily;
@@ -110,5 +123,7 @@ export declare const __testExports: {
     verifyAccountAccess: typeof verifyAccountAccess;
     resolveHeaderRoutingDecision: typeof resolveHeaderRoutingDecision;
     resolveQuotaFallbackHeaderStyle: typeof resolveQuotaFallbackHeaderStyle;
+    markStoredAccountVerificationRequired: typeof markStoredAccountVerificationRequired;
+    clearStoredAccountVerificationRequired: typeof clearStoredAccountVerificationRequired;
 };
 //# sourceMappingURL=plugin.d.ts.map

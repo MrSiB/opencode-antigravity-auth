@@ -2409,6 +2409,102 @@ describe("AccountManager", () => {
         expect(manager.isAccountCoolingDown(account)).toBe(true);
         expect(manager.getAccountCooldownReason(account)).toBe("last-survivor-cooldown");
       });
+
+      it("clearAccountVerificationRequired clears coolingDownUntil, coolingDownReason, and rateLimitResetTimes", () => {
+        const stored: AccountStorageV4 = {
+          version: 4,
+          accounts: [
+            { email: "solo@example.com", refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0, enabled: true },
+          ],
+          activeIndex: 0,
+        };
+
+        const manager = new AccountManager(undefined, stored);
+        const account = manager.getAccounts()[0]!;
+
+        manager.markAccountVerificationRequired(0, "validation_required");
+        manager.markRateLimited(account, 60_000, "claude");
+
+        expect(manager.isAccountCoolingDown(account)).toBe(true);
+        expect(account.coolingDownUntil).toBeDefined();
+        expect(account.cooldownReason).toBe("last-survivor-cooldown");
+        expect(account.rateLimitResetTimes.claude).toBeDefined();
+
+        const cleared = manager.clearAccountVerificationRequired(0, true);
+        expect(cleared).toBe(true);
+
+        expect(account.coolingDownUntil).toBeUndefined();
+        expect(account.cooldownReason).toBeUndefined();
+        expect(manager.isAccountCoolingDown(account)).toBe(false);
+        expect(account.rateLimitResetTimes).toEqual({});
+        expect(account.rateLimitSetTimes).toEqual({});
+        expect(account.verificationRequired).toBe(false);
+        expect(account.verificationRequiredAt).toBeUndefined();
+        expect(account.verificationRequiredReason).toBeUndefined();
+      });
+
+      it("getMinWaitTimeForFamily excludes cooling down accounts from available and returns remaining cooldown time", () => {
+        vi.useFakeTimers();
+        const base = 100_000;
+        vi.setSystemTime(new Date(base));
+
+        try {
+          const stored: AccountStorageV4 = {
+            version: 4,
+            accounts: [
+              { email: "a@example.com", refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0, enabled: true },
+            ],
+            activeIndex: 0,
+          };
+
+          const manager = new AccountManager(undefined, stored);
+          const account = manager.getAccounts()[0]!;
+
+          expect(manager.getMinWaitTimeForFamily("claude")).toBe(0);
+
+          manager.markAccountCoolingDown(account, 45_000, "auth-failure");
+
+          expect(manager.getMinWaitTimeForFamily("claude")).toBe(45_000);
+          expect(manager.getMinWaitTimeForFamily("gemini")).toBe(45_000);
+
+          vi.setSystemTime(new Date(base + 15_000));
+          expect(manager.getMinWaitTimeForFamily("claude")).toBe(30_000);
+
+          vi.setSystemTime(new Date(base + 45_000));
+          expect(manager.getMinWaitTimeForFamily("claude")).toBe(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("distinguishes getTotalAccountCount() from getAccountCount() when accounts are disabled", () => {
+        const stored: AccountStorageV4 = {
+          version: 4,
+          accounts: [
+            { email: "active@example.com", refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0, enabled: true },
+            { email: "disabled@example.com", refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0, enabled: false },
+          ],
+          activeIndex: 0,
+        };
+
+        const manager = new AccountManager(undefined, stored);
+        expect(manager.getAccountCount()).toBe(1);
+        expect(manager.getTotalAccountCount()).toBe(2);
+
+        const activeAccount = manager.getAccounts()[0]!;
+        manager.removeAccount(activeAccount);
+
+        expect(manager.getAccountCount()).toBe(0);
+        expect(manager.getTotalAccountCount()).toBe(1);
+        expect(manager.getTotalAccountCount() === 0).toBe(false);
+
+        const remainingAccount = manager.getAccounts()[0]!;
+        manager.removeAccount(remainingAccount);
+
+        expect(manager.getAccountCount()).toBe(0);
+        expect(manager.getTotalAccountCount()).toBe(0);
+        expect(manager.getTotalAccountCount() === 0).toBe(true);
+      });
     });
 
     describe("Startup Fail-Safe Recovery in AccountManager", () => {

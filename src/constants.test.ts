@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest"
 import {
+  ANTIGRAVITY_ENDPOINT,
+  ANTIGRAVITY_ENDPOINT_AUTOPUSH,
+  ANTIGRAVITY_ENDPOINT_DAILY,
+  ANTIGRAVITY_ENDPOINT_FALLBACKS,
+  ANTIGRAVITY_ENDPOINT_PROD,
   GEMINI_CLI_HEADERS,
   getAntigravityHeaders,
   getRandomizedHeaders,
@@ -92,5 +97,21 @@ describe("HeaderSet type", () => {
     expect(headers["User-Agent"]).toBe("test")
     expect(headers["X-Goog-Api-Client"]).toBe("test-client")
     expect(headers["Client-Metadata"]).toBe("test-metadata")
+  })
+})
+
+describe("ANTIGRAVITY_ENDPOINT", () => {
+  it("defaults to production cloudcode-pa endpoint", () => {
+    expect(ANTIGRAVITY_ENDPOINT).toBe(ANTIGRAVITY_ENDPOINT_PROD)
+  })
+})
+
+describe("ANTIGRAVITY_ENDPOINT_FALLBACKS", () => {
+  it("prioritizes PROD followed by DAILY and AUTOPUSH sandboxes", () => {
+    expect(ANTIGRAVITY_ENDPOINT_FALLBACKS).toEqual([
+      ANTIGRAVITY_ENDPOINT_PROD,
+      ANTIGRAVITY_ENDPOINT_DAILY,
+      ANTIGRAVITY_ENDPOINT_AUTOPUSH,
+    ])
   })
 })

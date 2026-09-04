@@ -9,32 +9,18 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { AntigravityConfigSchema, DEFAULT_CONFIG } from "./schema.js";
 import { createLogger } from "../logger.js";
+import { getCanonicalConfigDir } from "./paths.js";
 const log = createLogger("config");
 // =============================================================================
 // Path Utilities
 // =============================================================================
 /**
- * Get the config directory path, with the following precedence:
- * 1. OPENCODE_CONFIG_DIR env var (if set)
- * 2. ~/.config/opencode (all platforms, including Windows)
- */
-function getConfigDir() {
-    // 1. Check for explicit override via env var
-    if (process.env.OPENCODE_CONFIG_DIR) {
-        return process.env.OPENCODE_CONFIG_DIR;
-    }
-    // 2. Use ~/.config/opencode on all platforms (including Windows)
-    const xdgConfig = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-    return join(xdgConfig, "opencode");
-}
-/**
  * Get the user-level config file path.
  */
 export function getUserConfigPath() {
-    return join(getConfigDir(), "antigravity.json");
+    return join(getCanonicalConfigDir(), "antigravity.json");
 }
 /**
  * Get the project-level config file path.
@@ -128,7 +114,7 @@ export function configExists(path) {
  * Get the default logs directory.
  */
 export function getDefaultLogsDir() {
-    return join(getConfigDir(), "antigravity-logs");
+    return join(getCanonicalConfigDir(), "antigravity-logs");
 }
 let runtimeConfig = null;
 export function initRuntimeConfig(config) {

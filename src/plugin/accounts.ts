@@ -1127,15 +1127,25 @@ export class AccountManager {
       account.verificationRequiredReason !== undefined ||
       account.verificationUrl !== undefined
     );
+    const hadCooldownOrRateLimits = (
+      account.coolingDownUntil !== undefined ||
+      account.cooldownReason !== undefined ||
+      Object.keys(account.rateLimitResetTimes).length > 0 ||
+      Object.keys(account.rateLimitSetTimes).length > 0
+    );
 
     account.verificationRequired = false;
     account.verificationRequiredAt = undefined;
     account.verificationRequiredReason = undefined;
     account.verificationUrl = undefined;
 
+    this.clearAccountCooldown(account);
+    account.rateLimitResetTimes = {};
+    account.rateLimitSetTimes = {};
+
     if (enableAccount && wasVerificationRequired && account.enabled === false) {
       this.setAccountEnabled(accountIndex, true);
-    } else if (wasVerificationRequired || hadMetadata) {
+    } else if (wasVerificationRequired || hadMetadata || hadCooldownOrRateLimits) {
       this.requestSaveToDisk();
     }
 
@@ -1217,9 +1227,13 @@ export class AccountManager {
   ): number {
     const available = this.accounts.filter((a) => {
       clearExpiredRateLimits(a);
-      return a.enabled !== false && (strict && headerStyle
-        ? !isRateLimitedForHeaderStyle(a, family, headerStyle, model)
-        : !isRateLimitedForFamily(a, family, model));
+      return (
+        a.enabled !== false &&
+        !this.isAccountCoolingDown(a) &&
+        (strict && headerStyle
+          ? !isRateLimitedForHeaderStyle(a, family, headerStyle, model)
+          : !isRateLimitedForFamily(a, family, model))
+      );
     });
     if (available.length > 0) {
       return 0;
@@ -1227,6 +1241,12 @@ export class AccountManager {
 
     const waitTimes: number[] = [];
     for (const a of this.accounts) {
+      if (a.enabled === false) {
+        continue;
+      }
+      if (this.isAccountCoolingDown(a)) {
+        waitTimes.push(Math.max(0, (a.coolingDownUntil ?? 0) - nowMs()));
+      }
       if (family === "claude") {
         const t = a.rateLimitResetTimes.claude;
         if (t !== undefined) waitTimes.push(Math.max(0, t - nowMs()));

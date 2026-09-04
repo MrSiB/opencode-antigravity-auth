@@ -27,6 +27,10 @@ export interface ThinkingCacheData {
     signature: string;
     toolIds?: string[];
 }
+export declare const RENAME_RETRY_DELAY_MS = 50;
+export declare const RENAME_MAX_RETRIES = 3;
+export declare function getConfigDir(): string;
+export declare function getCacheFilePath(): string;
 export declare class SignatureCache {
     private cache;
     private memoryTtlMs;
@@ -38,7 +42,8 @@ export declare class SignatureCache {
     private writeTimer;
     private cleanupTimer;
     private stats;
-    constructor(config: SignatureCacheConfig);
+    constructor(config: SignatureCacheConfig, cacheFilePath?: string);
+    getCacheFilePath(): string;
     /**
      * Generate a cache key from sessionId and modelId.
      */
@@ -106,6 +111,6 @@ export declare class SignatureCache {
  * Create a signature cache with the given configuration.
  * Returns null if caching is disabled.
  */
-export declare function createSignatureCache(config: SignatureCacheConfig | undefined): SignatureCache | null;
+export declare function createSignatureCache(config: SignatureCacheConfig | undefined, cacheFilePath?: string): SignatureCache | null;
 export {};
 //# sourceMappingURL=signature-cache.d.ts.map

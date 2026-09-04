@@ -10,7 +10,7 @@
  */
 import type { AntigravityConfig } from "./config";
 import type { PluginClient } from "./types";
-import type { MessageInfo, RecoveryErrorType } from "./recovery/types";
+import type { MessageInfo, MessageData, MessagePart, RecoveryErrorType } from "./recovery/types";
 /**
  * Detect the type of recoverable error from an error object.
  */
@@ -19,6 +19,11 @@ export declare function detectErrorType(error: unknown): RecoveryErrorType;
  * Check if an error is recoverable.
  */
 export declare function isRecoverableError(error: unknown): boolean;
+export declare function extractToolUseIds(parts: MessagePart[]): string[];
+/**
+ * Recover from tool_result_missing error by injecting synthetic tool_result blocks.
+ */
+export declare function recoverToolResultMissing(client: PluginClient, sessionID: string, failedMsg: MessageData): Promise<boolean>;
 export declare function getRecoveryToastContent(errorType: RecoveryErrorType): {
     title: string;
     message: string;
@@ -41,6 +46,10 @@ export interface SessionRecoveryHook {
      * Check if the error is recoverable.
      */
     isRecoverableError: (error: unknown) => boolean;
+    /**
+     * Detect the type of recoverable error.
+     */
+    detectErrorType: (error: unknown) => RecoveryErrorType;
 }
 export interface SessionRecoveryContext {
     client: PluginClient;

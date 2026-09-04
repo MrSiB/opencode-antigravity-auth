@@ -1,14 +1,19 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { dirname } from "node:path";
 import {
   deduplicateAccountsByEmail,
   migrateV2ToV3,
   loadAccounts,
+  loadAccountsUnsafe,
   removeAccountFromStorage,
   saveAccounts,
   saveAccountsReplace,
+  writeAccountsAtomically,
   hashRefreshToken,
   DELETED_HASH_TTL_MS,
+  AccountStorageCorruptedError,
   type AccountMetadata,
+  type AccountMetadataV3,
   type AccountStorage,
   type AccountStorageV4,
 } from "./storage";
@@ -295,6 +300,7 @@ vi.mock("node:fs", async () => {
       rename: vi.fn().mockResolvedValue(undefined),
       copyFile: vi.fn().mockResolvedValue(undefined),
       appendFile: vi.fn(),
+      stat: vi.fn().mockRejectedValue({ code: "ENOENT" }),
     },
     existsSync: vi.fn(),
     readFileSync: vi.fn(),
@@ -1494,10 +1500,112 @@ describe("saveAccounts merge — cleared rate limits are not resurrected", () =>
       expect(merged.accounts.map((a) => a.refreshToken)).toEqual(["replaced-token"]);
       expect(merged.deletedRefreshTokenHashes).toBeUndefined();
     });
+
+    it("does not un-blacklist or resurrect account when incoming has lastUsed > deletedAt but addedAt < deletedAt", async () => {
+      const now = Date.now();
+      const token = "zombie-token";
+      const tokenHash = hashRefreshToken(token);
+      const deletedAt = now - 5000;
+
+      mockDisk({
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+        deletedRefreshTokenHashes: [
+          { hash: tokenHash, deletedAt },
+        ],
+      });
+
+      await saveAccounts({
+        version: 4,
+        accounts: [
+          {
+            email: "zombie@example.com",
+            refreshToken: token,
+            addedAt: deletedAt - 10000,
+            lastUsed: now,
+          },
+        ],
+        activeIndex: 0,
+      });
+
+      const merged = readMergedSnapshot();
+      expect(merged.accounts.map((a) => a.refreshToken)).not.toContain(token);
+      expect(merged.deletedRefreshTokenHashes).toEqual([
+        { hash: tokenHash, deletedAt },
+      ]);
+    });
+
+    it("does not un-blacklist or resurrect account when incoming has lastUsed > deletedAt but addedAt is undefined", async () => {
+      const now = Date.now();
+      const token = "zombie-no-added-token";
+      const tokenHash = hashRefreshToken(token);
+      const deletedAt = now - 5000;
+
+      mockDisk({
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+        deletedRefreshTokenHashes: [
+          { hash: tokenHash, deletedAt },
+        ],
+      });
+
+      await saveAccounts({
+        version: 4,
+        accounts: [
+          {
+            email: "zombie-no-added@example.com",
+            refreshToken: token,
+            lastUsed: now,
+          } as unknown as AccountMetadataV3,
+        ],
+        activeIndex: 0,
+      });
+
+      const merged = readMergedSnapshot();
+      expect(merged.accounts.map((a) => a.refreshToken)).not.toContain(token);
+      expect(merged.deletedRefreshTokenHashes).toEqual([
+        { hash: tokenHash, deletedAt },
+      ]);
+    });
+
+    it("un-blacklists account when incoming account has addedAt >= deletedAt", async () => {
+      const now = Date.now();
+      const token = "readded-token";
+      const tokenHash = hashRefreshToken(token);
+      const deletedAt = now - 5000;
+
+      mockDisk({
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+        deletedRefreshTokenHashes: [
+          { hash: tokenHash, deletedAt },
+        ],
+      });
+
+      await saveAccounts({
+        version: 4,
+        accounts: [
+          {
+            email: "readded@example.com",
+            refreshToken: token,
+            addedAt: deletedAt,
+            lastUsed: deletedAt,
+          },
+        ],
+        activeIndex: 0,
+      });
+
+      const merged = readMergedSnapshot();
+      expect(merged.accounts.map((a) => a.refreshToken)).toEqual([token]);
+      expect(merged.deletedRefreshTokenHashes).toBeUndefined();
+    });
   });
 
   describe("writeAccountsAtomically EBUSY/EXDEV/EPERM fallback", () => {
-    it("falls back to copyFile + unlink when fs.rename throws EBUSY", async () => {
+    it("retries fs.rename on transient EBUSY and succeeds on 3rd call without falling back to copyFile", async () => {
       mockDisk({
         version: 4,
         accounts: [],
@@ -1506,7 +1614,70 @@ describe("saveAccounts merge — cleared rate limits are not resurrected", () =>
 
       const ebusyError = new Error("EBUSY: resource busy or locked, rename") as NodeJS.ErrnoException;
       ebusyError.code = "EBUSY";
-      vi.mocked(fs.rename).mockRejectedValueOnce(ebusyError);
+
+      vi.mocked(fs.rename)
+        .mockRejectedValueOnce(ebusyError)
+        .mockRejectedValueOnce(ebusyError)
+        .mockResolvedValueOnce(undefined);
+
+      await saveAccounts({
+        version: 4,
+        accounts: [
+          {
+            email: "transient-ebusy@example.com",
+            refreshToken: "ebusy-token",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+        activeIndex: 0,
+      });
+
+      expect(fs.rename).toHaveBeenCalledTimes(3);
+      expect(fs.copyFile).not.toHaveBeenCalled();
+    });
+
+    it("retries fs.rename on transient EPERM and succeeds without falling back to copyFile", async () => {
+      mockDisk({
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+      });
+
+      const epermError = new Error("EPERM: operation not permitted") as NodeJS.ErrnoException;
+      epermError.code = "EPERM";
+
+      vi.mocked(fs.rename)
+        .mockRejectedValueOnce(epermError)
+        .mockResolvedValueOnce(undefined);
+
+      await saveAccounts({
+        version: 4,
+        accounts: [
+          {
+            email: "transient-eperm@example.com",
+            refreshToken: "eperm-token",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+        activeIndex: 0,
+      });
+
+      expect(fs.rename).toHaveBeenCalledTimes(2);
+      expect(fs.copyFile).not.toHaveBeenCalled();
+    });
+
+    it("falls back to copyFile + unlink when fs.rename fails on all retries with EBUSY", async () => {
+      mockDisk({
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+      });
+
+      const ebusyError = new Error("EBUSY: resource busy or locked, rename") as NodeJS.ErrnoException;
+      ebusyError.code = "EBUSY";
+      vi.mocked(fs.rename).mockRejectedValue(ebusyError);
 
       await saveAccounts({
         version: 4,
@@ -1521,14 +1692,16 @@ describe("saveAccounts merge — cleared rate limits are not resurrected", () =>
         activeIndex: 0,
       });
 
+      expect(fs.rename).toHaveBeenCalledTimes(6);
       expect(fs.copyFile).toHaveBeenCalledTimes(1);
       const copyArgs = vi.mocked(fs.copyFile).mock.calls[0];
       expect(String(copyArgs?.[0])).toContain(".tmp");
       expect(String(copyArgs?.[1])).toContain("antigravity-accounts.json");
+      expect(dirname(String(copyArgs?.[0]))).toBe(dirname(String(copyArgs?.[1])));
       expect(fs.unlink).toHaveBeenCalledWith(copyArgs?.[0]);
     });
 
-    it("falls back to copyFile + unlink when fs.rename throws EXDEV", async () => {
+    it("falls back to copyFile + unlink when fs.rename throws EXDEV without retries", async () => {
       mockDisk({
         version: 4,
         accounts: [],
@@ -1552,11 +1725,12 @@ describe("saveAccounts merge — cleared rate limits are not resurrected", () =>
         activeIndex: 0,
       });
 
+      expect(fs.rename).toHaveBeenCalledTimes(1);
       expect(fs.copyFile).toHaveBeenCalledTimes(1);
       expect(fs.unlink).toHaveBeenCalled();
     });
 
-    it("falls back to copyFile + unlink when fs.rename throws EPERM", async () => {
+    it("falls back to copyFile + unlink when fs.rename fails on all retries with EPERM", async () => {
       mockDisk({
         version: 4,
         accounts: [],
@@ -1565,7 +1739,7 @@ describe("saveAccounts merge — cleared rate limits are not resurrected", () =>
 
       const epermError = new Error("EPERM: operation not permitted") as NodeJS.ErrnoException;
       epermError.code = "EPERM";
-      vi.mocked(fs.rename).mockRejectedValueOnce(epermError);
+      vi.mocked(fs.rename).mockRejectedValue(epermError);
 
       await saveAccounts({
         version: 4,
@@ -1580,11 +1754,12 @@ describe("saveAccounts merge — cleared rate limits are not resurrected", () =>
         activeIndex: 0,
       });
 
+      expect(fs.rename).toHaveBeenCalledTimes(6);
       expect(fs.copyFile).toHaveBeenCalledTimes(1);
       expect(fs.unlink).toHaveBeenCalled();
     });
 
-    it("rethrows non-fallback error from fs.rename and cleans up temp file", async () => {
+    it("rethrows non-fallback error from fs.rename immediately without retry and cleans up temp file", async () => {
       mockDisk({
         version: 4,
         accounts: [],
@@ -1610,8 +1785,88 @@ describe("saveAccounts merge — cleared rate limits are not resurrected", () =>
         }),
       ).rejects.toThrow("EACCES");
 
+      expect(fs.rename).toHaveBeenCalledTimes(1);
       expect(fs.copyFile).not.toHaveBeenCalled();
       expect(fs.unlink).toHaveBeenCalled();
+    });
+
+    it("cleans up temp file when fs.writeFile throws ENOSPC and keeps .bak protected", async () => {
+      const targetPath = "/root/.config/opencode/antigravity-accounts.json";
+      vi.mocked(fs.stat).mockResolvedValueOnce({ size: 256 } as any);
+      vi.mocked(fs.copyFile).mockResolvedValue(undefined);
+      const enospcError = new Error("ENOSPC: no space left on device") as NodeJS.ErrnoException;
+      enospcError.code = "ENOSPC";
+      vi.mocked(fs.writeFile).mockRejectedValueOnce(enospcError);
+
+      await expect(
+        writeAccountsAtomically(targetPath, {
+          version: 4,
+          accounts: [],
+          activeIndex: 0,
+        }),
+      ).rejects.toThrow("ENOSPC");
+
+      const bakCall = vi.mocked(fs.copyFile).mock.calls.find(
+        (call) => String(call[1]).endsWith(".bak"),
+      );
+      expect(bakCall).toBeDefined();
+      expect(fs.unlink).toHaveBeenCalled();
+      expect(fs.rename).not.toHaveBeenCalled();
+    });
+
+    it("cleans up temp file when fs.copyFile throws ENOSPC during fallback and keeps .bak protected", async () => {
+      const targetPath = "/root/.config/opencode/antigravity-accounts.json";
+      vi.mocked(fs.stat).mockResolvedValueOnce({ size: 256 } as any);
+      const ebusyError = new Error("EBUSY: resource busy or locked, rename") as NodeJS.ErrnoException;
+      ebusyError.code = "EBUSY";
+      vi.mocked(fs.rename).mockRejectedValue(ebusyError);
+
+      const enospcError = new Error("ENOSPC: no space left on device") as NodeJS.ErrnoException;
+      enospcError.code = "ENOSPC";
+
+      vi.mocked(fs.copyFile).mockImplementation(async (_src, dest) => {
+        if (String(dest).endsWith(".bak")) {
+          return;
+        }
+        throw enospcError;
+      });
+
+      try {
+        await expect(
+          writeAccountsAtomically(targetPath, {
+            version: 4,
+            accounts: [],
+            activeIndex: 0,
+          }),
+        ).rejects.toThrow("ENOSPC");
+
+        expect(fs.unlink).toHaveBeenCalled();
+      } finally {
+        vi.mocked(fs.copyFile).mockResolvedValue(undefined);
+        vi.mocked(fs.rename).mockResolvedValue(undefined);
+      }
+    });
+
+    it("ensures tempPath is always located in dirname(path)", async () => {
+      vi.mocked(fs.rename).mockResolvedValue(undefined);
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+      vi.mocked(fs.stat).mockRejectedValue({ code: "ENOENT" });
+      const customPath = "/custom/dir/sub/accounts.json";
+      const storage: AccountStorageV4 = {
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+      };
+
+      await writeAccountsAtomically(customPath, storage);
+
+      const writeCall = vi.mocked(fs.writeFile).mock.calls.find((call) =>
+        String(call[0]).includes(".tmp"),
+      );
+      expect(writeCall).toBeDefined();
+      const writtenTempPath = String(writeCall?.[0]);
+      expect(dirname(writtenTempPath)).toBe(dirname(customPath));
+      expect(writtenTempPath).toMatch(/^\/custom\/dir\/sub\/accounts\.json\.[a-f0-9]{12}\.tmp$/);
     });
   });
 
@@ -1715,6 +1970,336 @@ describe("saveAccounts merge — cleared rate limits are not resurrected", () =>
       const merged = readMergedSnapshot();
       expect(merged.accounts[0]?.tag).toBe("new-tag");
       expect(merged.accounts[0]?.tags).toEqual(["new1", "new2"]);
+    });
+  });
+
+  describe("quarantine and backup auto-restoration", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("restores accounts from .bak and quarantines 0-byte accounts file on loadAccounts", async () => {
+      const backupStorage: AccountStorageV4 = {
+        version: 4,
+        accounts: [
+          {
+            email: "restored@example.com",
+            refreshToken: "restored-token",
+            addedAt: 100,
+            lastUsed: 200,
+          },
+        ],
+        activeIndex: 0,
+      };
+
+      vi.mocked(fs.readFile).mockImplementation(async (path) => {
+        const p = String(path);
+        if (p.endsWith(".gitignore")) {
+          const err = new Error("ENOENT") as NodeJS.ErrnoException;
+          err.code = "ENOENT";
+          throw err;
+        }
+        if (p.endsWith(".bak")) {
+          return JSON.stringify(backupStorage);
+        }
+        return "";
+      });
+
+      const loaded = await loadAccounts();
+      expect(loaded).not.toBeNull();
+      expect(loaded?.accounts[0]?.email).toBe("restored@example.com");
+
+      const renameCall = vi.mocked(fs.rename).mock.calls.find(
+        (call) => String(call[1]).includes(".corrupted."),
+      );
+      expect(renameCall).toBeDefined();
+
+      const copyCall = vi.mocked(fs.copyFile).mock.calls.find(
+        (call) => String(call[0]).endsWith(".bak") && !String(call[1]).includes(".corrupted."),
+      );
+      expect(copyCall).toBeDefined();
+    });
+
+    it("restores accounts from .bak and quarantines 0-byte accounts file on loadAccountsUnsafe", async () => {
+      const backupStorage: AccountStorageV4 = {
+        version: 4,
+        accounts: [
+          {
+            email: "unsafe-restored@example.com",
+            refreshToken: "unsafe-token",
+            addedAt: 100,
+            lastUsed: 200,
+          },
+        ],
+        activeIndex: 0,
+      };
+
+      vi.mocked(fs.readFile).mockImplementation(async (path) => {
+        const p = String(path);
+        if (p.endsWith(".gitignore")) {
+          const err = new Error("ENOENT") as NodeJS.ErrnoException;
+          err.code = "ENOENT";
+          throw err;
+        }
+        if (p.endsWith(".bak")) {
+          return JSON.stringify(backupStorage);
+        }
+        return "";
+      });
+
+      const loaded = await loadAccountsUnsafe();
+      expect(loaded).not.toBeNull();
+      expect(loaded?.accounts[0]?.email).toBe("unsafe-restored@example.com");
+
+      const renameCall = vi.mocked(fs.rename).mock.calls.find(
+        (call) => String(call[1]).includes(".corrupted."),
+      );
+      expect(renameCall).toBeDefined();
+    });
+
+    it("quarantines invalid JSON file to .corrupted.* and restores from .bak on loadAccounts", async () => {
+      const backupStorage: AccountStorageV4 = {
+        version: 4,
+        accounts: [
+          {
+            email: "valid-from-bak@example.com",
+            refreshToken: "bak-token",
+            addedAt: 50,
+            lastUsed: 60,
+          },
+        ],
+        activeIndex: 0,
+      };
+
+      vi.mocked(fs.readFile).mockImplementation(async (path) => {
+        const p = String(path);
+        if (p.endsWith(".gitignore")) {
+          const err = new Error("ENOENT") as NodeJS.ErrnoException;
+          err.code = "ENOENT";
+          throw err;
+        }
+        if (p.endsWith(".bak")) {
+          return JSON.stringify(backupStorage);
+        }
+        return "{ corrupted JSON [[[";
+      });
+
+      const loaded = await loadAccounts();
+      expect(loaded).not.toBeNull();
+      expect(loaded?.accounts[0]?.email).toBe("valid-from-bak@example.com");
+
+      const renameCall = vi.mocked(fs.rename).mock.calls.find(
+        (call) => String(call[1]).includes(".corrupted."),
+      );
+      expect(renameCall).toBeDefined();
+
+      const restoreCall = vi.mocked(fs.copyFile).mock.calls.find(
+        (call) => String(call[0]).endsWith(".bak"),
+      );
+      expect(restoreCall).toBeDefined();
+    });
+
+    it("throws AccountStorageCorruptedError when corrupted accounts file has NO .bak", async () => {
+      vi.mocked(fs.readFile).mockImplementation(async (path) => {
+        const p = String(path);
+        if (p.endsWith(".bak") || p.endsWith(".gitignore")) {
+          const err = new Error("ENOENT") as NodeJS.ErrnoException;
+          err.code = "ENOENT";
+          throw err;
+        }
+        return "not valid json {{{";
+      });
+
+      await expect(loadAccounts()).rejects.toThrow(AccountStorageCorruptedError);
+      await expect(loadAccountsUnsafe()).rejects.toThrow(AccountStorageCorruptedError);
+    });
+
+    it("throws AccountStorageCorruptedError on saveAccounts without wiping when accounts file is corrupted with NO .bak", async () => {
+      vi.mocked(fs.readFile).mockImplementation(async (path) => {
+        const p = String(path);
+        if (p.endsWith(".bak") || p.endsWith(".gitignore")) {
+          const err = new Error("ENOENT") as NodeJS.ErrnoException;
+          err.code = "ENOENT";
+          throw err;
+        }
+        return "corrupted content";
+      });
+
+      await expect(
+        saveAccounts({
+          version: 4,
+          accounts: [
+            {
+              email: "new@example.com",
+              refreshToken: "tok",
+              addedAt: 1,
+              lastUsed: 1,
+            },
+          ],
+          activeIndex: 0,
+        }),
+      ).rejects.toThrow(AccountStorageCorruptedError);
+
+      const wipedCall = vi.mocked(fs.writeFile).mock.calls.find((call) => {
+        const content = String(call[1]);
+        return content.includes('"accounts": []') && !String(call[0]).endsWith(".gitignore");
+      });
+      expect(wipedCall).toBeUndefined();
+    });
+
+    it("throws AccountStorageCorruptedError when accounts file is 0 bytes and NO .bak exists", async () => {
+      vi.mocked(fs.readFile).mockImplementation(async (path) => {
+        const p = String(path);
+        if (p.endsWith(".bak") || p.endsWith(".gitignore")) {
+          const err = new Error("ENOENT") as NodeJS.ErrnoException;
+          err.code = "ENOENT";
+          throw err;
+        }
+        return "";
+      });
+
+      await expect(loadAccounts()).rejects.toThrow(AccountStorageCorruptedError);
+      await expect(loadAccountsUnsafe()).rejects.toThrow(AccountStorageCorruptedError);
+    });
+
+    it("throws AccountStorageCorruptedError when accounts file is corrupted and .bak is also corrupted", async () => {
+      vi.mocked(fs.readFile).mockImplementation(async (path) => {
+        const p = String(path);
+        if (p.endsWith(".gitignore")) {
+          const err = new Error("ENOENT") as NodeJS.ErrnoException;
+          err.code = "ENOENT";
+          throw err;
+        }
+        if (p.endsWith(".bak")) {
+          return "{ broken bak json";
+        }
+        return "{ broken primary json";
+      });
+
+      await expect(loadAccounts()).rejects.toThrow(AccountStorageCorruptedError);
+      await expect(loadAccountsUnsafe()).rejects.toThrow(AccountStorageCorruptedError);
+    });
+
+    it("creates/updates .bak before atomic write when destination file exists and has non-zero size", async () => {
+      mockDisk({
+        version: 4,
+        accounts: [
+          {
+            email: "existing@example.com",
+            refreshToken: "tok1",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+        activeIndex: 0,
+      });
+
+      vi.mocked(fs.stat).mockResolvedValue({ size: 512 } as any);
+
+      await saveAccounts({
+        version: 4,
+        accounts: [
+          {
+            email: "updated@example.com",
+            refreshToken: "tok2",
+            addedAt: 2,
+            lastUsed: 2,
+          },
+        ],
+        activeIndex: 0,
+      });
+
+      const bakCopyCall = vi.mocked(fs.copyFile).mock.calls.find(
+        (call) =>
+          String(call[0]).endsWith("antigravity-accounts.json") &&
+          String(call[1]).endsWith("antigravity-accounts.json.bak"),
+      );
+      expect(bakCopyCall).toBeDefined();
+    });
+
+    it("does not create .bak before atomic write when destination file does not exist", async () => {
+      mockDisk({
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+      });
+
+      const enoent = new Error("ENOENT") as NodeJS.ErrnoException;
+      enoent.code = "ENOENT";
+      vi.mocked(fs.stat).mockRejectedValue(enoent);
+
+      await saveAccounts({
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+      });
+
+      const bakCopyCall = vi.mocked(fs.copyFile).mock.calls.find(
+        (call) => String(call[1]).endsWith(".bak"),
+      );
+      expect(bakCopyCall).toBeUndefined();
+    });
+
+    it("does not create .bak before atomic write when destination file has zero size", async () => {
+      mockDisk({
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+      });
+
+      vi.mocked(fs.stat).mockResolvedValue({ size: 0 } as any);
+
+      await saveAccounts({
+        version: 4,
+        accounts: [],
+        activeIndex: 0,
+      });
+
+      const bakCopyCall = vi.mocked(fs.copyFile).mock.calls.find(
+        (call) => String(call[1]).endsWith(".bak"),
+      );
+      expect(bakCopyCall).toBeUndefined();
+    });
+
+    it("falls back to copyFile and unlink when fs.rename throws EBUSY during quarantine", async () => {
+      const backupStorage: AccountStorageV4 = {
+        version: 4,
+        accounts: [
+          {
+            email: "docker-busy@example.com",
+            refreshToken: "tok-busy",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+        activeIndex: 0,
+      };
+
+      vi.mocked(fs.readFile).mockImplementation(async (path) => {
+        const p = String(path);
+        if (p.endsWith(".gitignore")) {
+          const err = new Error("ENOENT") as NodeJS.ErrnoException;
+          err.code = "ENOENT";
+          throw err;
+        }
+        if (p.endsWith(".bak")) {
+          return JSON.stringify(backupStorage);
+        }
+        return "";
+      });
+
+      const ebusy = new Error("EBUSY: resource busy or locked") as NodeJS.ErrnoException;
+      ebusy.code = "EBUSY";
+      vi.mocked(fs.rename).mockRejectedValueOnce(ebusy);
+
+      const loaded = await loadAccounts();
+      expect(loaded).not.toBeNull();
+      expect(loaded?.accounts[0]?.email).toBe("docker-busy@example.com");
+
+      const copyToCorrupted = vi.mocked(fs.copyFile).mock.calls.find(
+        (call) => String(call[1]).includes(".corrupted."),
+      );
+      expect(copyToCorrupted).toBeDefined();
     });
   });
 });

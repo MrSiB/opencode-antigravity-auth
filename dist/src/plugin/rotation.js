@@ -63,7 +63,7 @@ export class HealthScoreTracker {
         }
         // Apply passive recovery based on time since last update
         const now = Date.now();
-        const hoursSinceUpdate = (now - state.lastUpdated) / (1000 * 60 * 60);
+        const hoursSinceUpdate = Math.max(0, (now - state.lastUpdated) / (1000 * 60 * 60));
         const recoveredPoints = Math.floor(hoursSinceUpdate * this.config.recoveryRatePerHour);
         return Math.min(this.config.maxScore, state.score + recoveredPoints);
     }
@@ -209,12 +209,17 @@ export function selectHybridAccount(accounts, tokenTracker, currentAccountIndex 
     }
     return best.index;
 }
-function calculateHybridScore(account, maxTokens) {
-    const healthComponent = account.healthScore * 2; // 0-200
-    const tokenComponent = (account.tokens / maxTokens) * 100 * 5; // 0-500
-    const secondsSinceUsed = (Date.now() - account.lastUsed) / 1000;
+export function calculateHybridScore(account, maxTokens) {
+    const safeMaxTokens = typeof maxTokens === "number" && Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : 50;
+    const healthScore = Number.isFinite(account?.healthScore) ? account.healthScore : 0;
+    const tokens = Number.isFinite(account?.tokens) ? account.tokens : 0;
+    const lastUsed = Number.isFinite(account?.lastUsed) ? account.lastUsed : 0;
+    const healthComponent = healthScore * 2; // 0-200
+    const tokenComponent = (tokens / safeMaxTokens) * 100 * 5; // 0-500
+    const secondsSinceUsed = Math.max(0, Date.now() - lastUsed) / 1000;
     const freshnessComponent = Math.min(secondsSinceUsed, 3600) * 0.1; // 0-360
-    return Math.max(0, healthComponent + tokenComponent + freshnessComponent);
+    const total = healthComponent + tokenComponent + freshnessComponent;
+    return Number.isFinite(total) ? Math.max(0, total) : 0;
 }
 export const DEFAULT_TOKEN_BUCKET_CONFIG = {
     maxTokens: 50,
@@ -240,7 +245,7 @@ export class TokenBucketTracker {
             return this.config.initialTokens;
         }
         const now = Date.now();
-        const minutesSinceUpdate = (now - state.lastUpdated) / (1000 * 60);
+        const minutesSinceUpdate = Math.max(0, (now - state.lastUpdated) / (1000 * 60));
         const recoveredTokens = minutesSinceUpdate * this.config.regenerationRatePerMinute;
         return Math.min(this.config.maxTokens, state.tokens + recoveredTokens);
     }

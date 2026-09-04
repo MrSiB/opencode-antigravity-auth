@@ -7,6 +7,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { OPENCODE_MODEL_DEFINITIONS } from "./models.js";
+import { getCanonicalConfigDir } from "./paths.js";
 // =============================================================================
 // Constants
 // =============================================================================
@@ -23,8 +24,7 @@ function stripJsonCommentsAndTrailingCommas(json) {
  * Get the opencode config directory path.
  */
 export function getOpencodeConfigDir() {
-    const xdgConfig = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-    return join(xdgConfig, "opencode");
+    return getCanonicalConfigDir();
 }
 /**
  * Get the opencode auth.json file path (~/.local/share/opencode/auth.json).

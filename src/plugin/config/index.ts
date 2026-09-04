@@ -29,3 +29,5 @@ export {
   initRuntimeConfig,
   getKeepThinking,
 } from "./loader";
+
+export { getCanonicalConfigDir } from "./paths";

@@ -1,7 +1,7 @@
 import { createWriteStream, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { env } from "node:process";
-import { homedir } from "node:os";
+import { getCanonicalConfigDir } from "./config/paths.js";
 import { deriveDebugPolicy, formatAccountContextLabel, formatAccountLabel, formatBodyPreviewForLog, formatErrorForLog, isTruthyFlag, truncateTextForLog, } from "./logging-utils.js";
 import { ensureGitignoreSync } from "./storage.js";
 const MAX_BODY_PREVIEW_CHARS = 12000;
@@ -9,21 +9,10 @@ const MAX_BODY_LOG_CHARS = 50000;
 export const DEBUG_MESSAGE_PREFIX = "[opencode-antigravity-auth debug]";
 let debugState = null;
 /**
- * Get the OS-specific config directory.
- */
-function getConfigDir() {
-    const platform = process.platform;
-    if (platform === "win32") {
-        return join(env.APPDATA || join(homedir(), "AppData", "Roaming"), "opencode");
-    }
-    const xdgConfig = env.XDG_CONFIG_HOME || join(homedir(), ".config");
-    return join(xdgConfig, "opencode");
-}
-/**
  * Returns the logs directory, creating it if needed.
  */
 function getLogsDir(customLogDir) {
-    const logsDir = customLogDir || join(getConfigDir(), "antigravity-logs");
+    const logsDir = customLogDir || join(getCanonicalConfigDir(), "antigravity-logs");
     try {
         mkdirSync(logsDir, { recursive: true });
     }
@@ -108,7 +97,7 @@ export function initializeDebug(config) {
     const logFilePath = debugEnabled ? createLogFilePath(config.log_dir) : undefined;
     const logWriter = createLogWriter(logFilePath);
     if (debugEnabled) {
-        ensureGitignoreSync(getConfigDir());
+        ensureGitignoreSync(getCanonicalConfigDir());
     }
     debugState = {
         debugEnabled,

@@ -258,6 +258,29 @@ type AnyAccountStorage =
   | AccountStorageV3
   | AccountStorageV4;
 
+export class AccountStorageCorruptedError extends Error {
+  public readonly path?: string;
+  public override readonly cause?: unknown;
+
+  constructor(message: string, pathOrCause?: string | unknown, cause?: unknown) {
+    let extractedPath: string | undefined;
+    let extractedCause: unknown;
+
+    if (typeof pathOrCause === "string") {
+      extractedPath = pathOrCause;
+      extractedCause = cause;
+    } else {
+      extractedCause = pathOrCause;
+    }
+
+    super(message);
+    this.name = "AccountStorageCorruptedError";
+    this.path = extractedPath;
+    this.cause = extractedCause;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
 /**
  * Gets the legacy Windows config directory (%APPDATA%\opencode).
  * Used for migration from older plugin versions.
@@ -739,10 +762,8 @@ function mergeAccountStorage(
       const hash = hashRefreshToken(acc.refreshToken);
       if (activeDeletedHashes.has(hash)) {
         const deletedAt = activeDeletedHashes.get(hash);
-        const hasTimestamps = acc.addedAt !== undefined || acc.lastUsed !== undefined;
-        const accTime = Math.max(acc.addedAt ?? 0, acc.lastUsed ?? 0);
         if (deletedAt !== undefined) {
-          if (!hasTimestamps || accTime >= deletedAt) {
+          if (acc.addedAt !== undefined && acc.addedAt >= deletedAt) {
             activeDeletedHashes.delete(hash);
           }
         } else {
@@ -1008,14 +1029,151 @@ export function migrateV3ToV4(v3: AccountStorageV3): AccountStorageV4 {
   };
 }
 
-export async function loadAccounts(): Promise<AccountStorageV4 | null> {
-  try {
-    const path = getStoragePath();
-    // Ensure permissions are correct on load (fixes existing files)
-    await ensureSecurePermissions(path);
+interface ReadStorageResult {
+  data: AnyAccountStorage;
+  restoredFromBak: boolean;
+}
 
-    const content = await fs.readFile(path, "utf-8");
-    const data = JSON.parse(content) as AnyAccountStorage;
+async function readAndRecoverAccountsFile(
+  path: string,
+): Promise<ReadStorageResult | null> {
+  await ensureSecurePermissions(path);
+
+  let content: string;
+  try {
+    content = await fs.readFile(path, "utf-8");
+    if (typeof content !== "string") {
+      return null;
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      return null;
+    }
+    log.error("Failed to read account storage file", { path, error: String(error) });
+    return null;
+  }
+
+  const isZeroByte = content.trim().length === 0;
+  let parsed: AnyAccountStorage | null = null;
+  let syntaxError: unknown = undefined;
+
+  if (!isZeroByte) {
+    try {
+      const raw = JSON.parse(content);
+      if (!raw || typeof raw !== "object") {
+        syntaxError = new SyntaxError("Parsed accounts JSON is not an object");
+      } else {
+        parsed = raw as AnyAccountStorage;
+      }
+    } catch (err) {
+      if (err instanceof SyntaxError) {
+        syntaxError = err;
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  if (!isZeroByte && parsed !== null) {
+    return { data: parsed, restoredFromBak: false };
+  }
+
+  const corruptionReason = isZeroByte
+    ? "0-byte file"
+    : `SyntaxError: ${(syntaxError as Error)?.message || "invalid JSON"}`;
+
+  const corruptedPath = `${path}.corrupted.${Date.now()}`;
+  try {
+    await fs.rename(path, corruptedPath);
+  } catch (renameErr) {
+    const code = (renameErr as NodeJS.ErrnoException).code;
+    if (code === "EBUSY" || code === "EXDEV" || code === "EPERM") {
+      try {
+        await fs.copyFile(path, corruptedPath);
+        try {
+          await fs.unlink(path);
+        } catch {
+        }
+      } catch (copyErr) {
+        log.warn("Failed to copy damaged accounts file to corrupted path", {
+          path,
+          corruptedPath,
+          error: String(copyErr),
+        });
+      }
+    } else if (code !== "ENOENT") {
+      log.warn("Failed to quarantine corrupted accounts file", {
+        path,
+        corruptedPath,
+        error: String(renameErr),
+      });
+    }
+  }
+
+  const bakPath = `${path}.bak`;
+  let bakContent: string | null = null;
+  try {
+    bakContent = await fs.readFile(bakPath, "utf-8");
+  } catch (bakReadErr) {
+    const code = (bakReadErr as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      log.warn("Failed to read accounts backup file", {
+        bakPath,
+        error: String(bakReadErr),
+      });
+    }
+  }
+
+  let restoredData: AnyAccountStorage | null = null;
+  if (typeof bakContent === "string" && bakContent.trim().length > 0) {
+    try {
+      const bakRaw = JSON.parse(bakContent);
+      if (bakRaw && typeof bakRaw === "object") {
+        restoredData = bakRaw as AnyAccountStorage;
+      }
+    } catch (bakParseErr) {
+      log.warn("Backup accounts file is also corrupted and failed to parse", {
+        bakPath,
+        error: String(bakParseErr),
+      });
+      restoredData = null;
+    }
+  }
+
+  if (restoredData !== null) {
+    try {
+      await fs.copyFile(bakPath, path);
+    } catch (restoreCopyErr) {
+      log.warn("Failed to copy backup file over damaged accounts file", {
+        bakPath,
+        path,
+        error: String(restoreCopyErr),
+      });
+    }
+    log.warn(
+      `Corrupted accounts file detected (${corruptionReason}). Quarantined to ${corruptedPath} and restored from ${bakPath}.`,
+    );
+    return { data: restoredData, restoredFromBak: true };
+  }
+
+  const detailMsg =
+    typeof bakContent !== "string"
+      ? `Accounts storage file at "${path}" is corrupted (${corruptionReason}) and no backup file exists (${bakPath}).`
+      : `Accounts storage file at "${path}" is corrupted (${corruptionReason}) and backup file (${bakPath}) is also corrupted.`;
+
+  log.error(detailMsg);
+  throw new AccountStorageCorruptedError(detailMsg, path, syntaxError);
+}
+
+export async function loadAccounts(path: string = getStoragePath()): Promise<AccountStorageV4 | null> {
+  try {
+    const result = await readAndRecoverAccountsFile(path);
+    if (!result) {
+      return null;
+    }
+
+    const data = result.data;
 
     if (!Array.isArray(data.accounts)) {
       log.warn("Invalid storage format, ignoring");
@@ -1155,6 +1313,9 @@ export async function loadAccounts(): Promise<AccountStorageV4 | null> {
       ),
     };
   } catch (error) {
+    if (error instanceof AccountStorageCorruptedError) {
+      throw error;
+    }
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
       return null;
@@ -1171,7 +1332,7 @@ export async function saveAccounts(storage: AccountStorageV4): Promise<void> {
   await ensureGitignore(configDir);
 
   await withFileLock(path, async () => {
-    const existing = await loadAccountsUnsafe();
+    const existing = await loadAccountsUnsafe(path);
     const merged = existing
       ? mergeAccountStorage(existing, storage)
       : mergeAccountStorage({ version: 4, accounts: [], activeIndex: 0 }, storage);
@@ -1191,7 +1352,7 @@ export async function saveAccountsReplace(storage: AccountStorageV4): Promise<vo
   await ensureGitignore(configDir);
 
   await withFileLock(path, async () => {
-    const existing = await loadAccountsUnsafe();
+    const existing = await loadAccountsUnsafe(path);
     const activeDeletedHashes = new Map<string, number | undefined>();
     for (const [hash, deletedAt] of getActiveDeletedHashes(existing?.deletedRefreshTokenHashes).entries()) {
       activeDeletedHashes.set(hash, deletedAt);
@@ -1224,7 +1385,7 @@ export async function removeAccountFromStorage(refreshToken: string): Promise<vo
   await ensureGitignore(configDir);
 
   await withFileLock(path, async () => {
-    const existing = await loadAccountsUnsafe();
+    const existing = await loadAccountsUnsafe(path);
     if (!existing) return;
     const activeDeletedHashes = getActiveDeletedHashes(existing.deletedRefreshTokenHashes);
     activeDeletedHashes.set(hashRefreshToken(refreshToken), Date.now());
@@ -1249,16 +1410,75 @@ export async function removeAccountFromStorage(refreshToken: string): Promise<vo
   });
 }
 
-async function writeAccountsAtomically(path: string, storage: AccountStorageV4): Promise<void> {
+export const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+export const delay = sleep;
+
+export const RENAME_RETRY_DELAYS_MS = [50, 100, 150, 200, 250] as const;
+
+export async function writeAccountsAtomically(path: string, storage: AccountStorageV4): Promise<void> {
+  try {
+    if (typeof fs.stat === "function") {
+      const stat = await fs.stat(path);
+      if (stat && stat.size > 0) {
+        const bakPath = `${path}.bak`;
+        try {
+          await fs.copyFile(path, bakPath);
+        } catch (copyErr) {
+          log.warn("Failed to create accounts backup before atomic write", {
+            path,
+            bakPath,
+            error: String(copyErr),
+          });
+        }
+      }
+    }
+  } catch (statError) {
+    const code = (statError as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      log.warn("Failed to stat accounts file before atomic write", {
+        path,
+        error: String(statError),
+      });
+    }
+  }
+
   const tempPath = `${path}.${randomBytes(6).toString("hex")}.tmp`;
   const content = JSON.stringify(storage, null, 2);
 
   try {
     await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
+    
+    let renamed = false;
+    let lastError: unknown;
+
     try {
       await fs.rename(tempPath, path);
+      renamed = true;
     } catch (renameError) {
-      const code = (renameError as NodeJS.ErrnoException).code;
+      lastError = renameError;
+      const initialCode = (renameError as NodeJS.ErrnoException)?.code;
+      if (initialCode === "EBUSY" || initialCode === "EPERM") {
+        for (const delayMs of RENAME_RETRY_DELAYS_MS) {
+          await sleep(delayMs);
+          try {
+            await fs.rename(tempPath, path);
+            renamed = true;
+            break;
+          } catch (retryError) {
+            lastError = retryError;
+            const retryCode = (retryError as NodeJS.ErrnoException)?.code;
+            if (retryCode !== "EBUSY" && retryCode !== "EPERM") {
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (!renamed) {
+      const code = (lastError as NodeJS.ErrnoException)?.code;
       if (code === "EBUSY" || code === "EXDEV" || code === "EPERM") {
         log.warn("Atomic rename failed, falling back to copy+unlink", {
           code,
@@ -1268,7 +1488,7 @@ async function writeAccountsAtomically(path: string, storage: AccountStorageV4):
         await fs.copyFile(tempPath, path);
         await fs.unlink(tempPath);
       } else {
-        throw renameError;
+        throw lastError;
       }
     }
   } catch (error) {
@@ -1281,39 +1501,30 @@ async function writeAccountsAtomically(path: string, storage: AccountStorageV4):
   }
 }
 
-async function loadAccountsUnsafe(): Promise<AccountStorageV4 | null> {
-  try {
-    const path = getStoragePath();
-    // Ensure permissions are correct on load (fixes existing files)
-    await ensureSecurePermissions(path);
-
-    const content = await fs.readFile(path, "utf-8");
-    const parsed = JSON.parse(content) as AnyAccountStorage;
-
-    if (parsed.version === 1) {
-      return remapDeduplicatedStorage(
-        migrateV3ToV4(migrateV2ToV3(migrateV1ToV2(parsed))),
-      );
-    }
-    if (parsed.version === 2) {
-      return remapDeduplicatedStorage(migrateV3ToV4(migrateV2ToV3(parsed)));
-    }
-    if (parsed.version === 3) {
-      return remapDeduplicatedStorage(migrateV3ToV4(parsed));
-    }
-
-    if (parsed.version === 4) {
-      return remapDeduplicatedStorage(parsed);
-    }
-
-    return null;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") {
-      return null;
-    }
+export async function loadAccountsUnsafe(path: string = getStoragePath()): Promise<AccountStorageV4 | null> {
+  const result = await readAndRecoverAccountsFile(path);
+  if (!result) {
     return null;
   }
+  const parsed = result.data;
+
+  if (parsed.version === 1) {
+    return remapDeduplicatedStorage(
+      migrateV3ToV4(migrateV2ToV3(migrateV1ToV2(parsed))),
+    );
+  }
+  if (parsed.version === 2) {
+    return remapDeduplicatedStorage(migrateV3ToV4(migrateV2ToV3(parsed)));
+  }
+  if (parsed.version === 3) {
+    return remapDeduplicatedStorage(migrateV3ToV4(parsed));
+  }
+
+  if (parsed.version === 4) {
+    return remapDeduplicatedStorage(parsed);
+  }
+
+  return null;
 }
 
 function remapDeduplicatedStorage(storage: AccountStorageV4): AccountStorageV4 {
