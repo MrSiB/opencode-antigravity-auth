@@ -23,19 +23,19 @@ export declare const ANTIGRAVITY_ENDPOINT_DAILY = "https://daily-cloudcode-pa.sa
 export declare const ANTIGRAVITY_ENDPOINT_AUTOPUSH = "https://autopush-cloudcode-pa.sandbox.googleapis.com";
 export declare const ANTIGRAVITY_ENDPOINT_PROD = "https://cloudcode-pa.googleapis.com";
 /**
- * Endpoint fallback order (prod → daily → autopush).
- * Production endpoint is prioritized, with sandboxes as fallbacks.
+ * Endpoint fallback order (daily → autopush → prod).
+ * Daily sandbox endpoint is prioritized where gemini-3.8-flash-tiered is hosted.
  */
-export declare const ANTIGRAVITY_ENDPOINT_FALLBACKS: readonly ["https://cloudcode-pa.googleapis.com", "https://daily-cloudcode-pa.sandbox.googleapis.com", "https://autopush-cloudcode-pa.sandbox.googleapis.com"];
+export declare const ANTIGRAVITY_ENDPOINT_FALLBACKS: readonly ["https://daily-cloudcode-pa.sandbox.googleapis.com", "https://autopush-cloudcode-pa.sandbox.googleapis.com", "https://cloudcode-pa.googleapis.com"];
 /**
  * Preferred endpoint order for project discovery (prod first, then fallbacks).
  * loadCodeAssist appears to be best supported on prod for managed project resolution.
  */
 export declare const ANTIGRAVITY_LOAD_ENDPOINTS: readonly ["https://cloudcode-pa.googleapis.com", "https://daily-cloudcode-pa.sandbox.googleapis.com", "https://autopush-cloudcode-pa.sandbox.googleapis.com"];
 /**
- * Primary endpoint to use (production cloudcode-pa).
+ * Primary endpoint to use (daily sandbox cloudcode-pa).
  */
-export declare const ANTIGRAVITY_ENDPOINT = "https://cloudcode-pa.googleapis.com";
+export declare const ANTIGRAVITY_ENDPOINT = "https://daily-cloudcode-pa.sandbox.googleapis.com";
 /**
  * Gemini CLI endpoint (production).
  * Used for models without :antigravity suffix.

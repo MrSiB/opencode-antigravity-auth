@@ -34,13 +34,13 @@ export const ANTIGRAVITY_ENDPOINT_AUTOPUSH = "https://autopush-cloudcode-pa.sand
 export const ANTIGRAVITY_ENDPOINT_PROD = "https://cloudcode-pa.googleapis.com";
 
 /**
- * Endpoint fallback order (prod → daily → autopush).
- * Production endpoint is prioritized, with sandboxes as fallbacks.
+ * Endpoint fallback order (daily → autopush → prod).
+ * Daily sandbox endpoint is prioritized where gemini-3.8-flash-tiered is hosted.
  */
 export const ANTIGRAVITY_ENDPOINT_FALLBACKS = [
-  ANTIGRAVITY_ENDPOINT_PROD,
   ANTIGRAVITY_ENDPOINT_DAILY,
   ANTIGRAVITY_ENDPOINT_AUTOPUSH,
+  ANTIGRAVITY_ENDPOINT_PROD,
 ] as const;
 
 /**
@@ -54,9 +54,9 @@ export const ANTIGRAVITY_LOAD_ENDPOINTS = [
 ] as const;
 
 /**
- * Primary endpoint to use (production cloudcode-pa).
+ * Primary endpoint to use (daily sandbox cloudcode-pa).
  */
-export const ANTIGRAVITY_ENDPOINT = ANTIGRAVITY_ENDPOINT_PROD;
+export const ANTIGRAVITY_ENDPOINT = ANTIGRAVITY_ENDPOINT_DAILY;
 
 /**
  * Gemini CLI endpoint (production).

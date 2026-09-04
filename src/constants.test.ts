@@ -101,17 +101,18 @@ describe("HeaderSet type", () => {
 })
 
 describe("ANTIGRAVITY_ENDPOINT", () => {
-  it("defaults to production cloudcode-pa endpoint", () => {
-    expect(ANTIGRAVITY_ENDPOINT).toBe(ANTIGRAVITY_ENDPOINT_PROD)
+  it("defaults to daily sandbox endpoint", () => {
+    expect(ANTIGRAVITY_ENDPOINT).toBe(ANTIGRAVITY_ENDPOINT_DAILY)
   })
 })
 
 describe("ANTIGRAVITY_ENDPOINT_FALLBACKS", () => {
-  it("prioritizes PROD followed by DAILY and AUTOPUSH sandboxes", () => {
+  it("prioritizes DAILY followed by AUTOPUSH and PROD sandboxes", () => {
     expect(ANTIGRAVITY_ENDPOINT_FALLBACKS).toEqual([
-      ANTIGRAVITY_ENDPOINT_PROD,
       ANTIGRAVITY_ENDPOINT_DAILY,
       ANTIGRAVITY_ENDPOINT_AUTOPUSH,
+      ANTIGRAVITY_ENDPOINT_PROD,
     ])
+    expect(ANTIGRAVITY_ENDPOINT_FALLBACKS[0]).toBe(ANTIGRAVITY_ENDPOINT_DAILY)
   })
 })

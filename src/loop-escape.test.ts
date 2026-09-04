@@ -28,11 +28,6 @@ beforeEach(() => {
 describe("fix 1: capacity-retry loop escape decision (hasUsableEndpointAfterIndex)", () => {
   const prodIndex = ANTIGRAVITY_ENDPOINT_FALLBACKS.indexOf(ANTIGRAVITY_ENDPOINT_PROD);
 
-  it("PROD is prioritized at index 0 in ANTIGRAVITY_ENDPOINT_FALLBACKS", () => {
-    expect(prodIndex).toBe(0);
-    expect(ANTIGRAVITY_ENDPOINT_FALLBACKS[0]).toBe(ANTIGRAVITY_ENDPOINT_PROD);
-  });
-
   it("PROD is the only usable endpoint for gemini-cli (sandbox endpoints skipped)", () => {
     for (let i = 0; i < ANTIGRAVITY_ENDPOINT_FALLBACKS.length; i++) {
       const endpoint = ANTIGRAVITY_ENDPOINT_FALLBACKS[i]!;
@@ -49,10 +44,8 @@ describe("fix 1: capacity-retry loop escape decision (hasUsableEndpointAfterInde
 
   it("gemini-cli has NO usable endpoint after PROD -> must switch account after capacity exhaustion", () => {
     expect(hooks.hasUsableEndpointAfterIndex(prodIndex, "gemini-cli")).toBe(false);
-
-    for (let i = 0; i < ANTIGRAVITY_ENDPOINT_FALLBACKS.length; i++) {
-      expect(hooks.hasUsableEndpointAfterIndex(i, "gemini-cli")).toBe(false);
-    }
+    expect(hooks.hasUsableEndpointAfterIndex(0, "gemini-cli")).toBe(true);
+    expect(hooks.hasUsableEndpointAfterIndex(prodIndex - 1, "gemini-cli")).toBe(true);
   });
 
   it("antigravity still tries later endpoints, but switches after the last one", () => {
