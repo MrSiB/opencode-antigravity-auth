@@ -1337,23 +1337,35 @@ export const createAntigravityPlugin = (providerId) => async ({ client, director
     await initAntigravityVersion();
     // Initialize health tracker for hybrid strategy
     if (config.health_score) {
-        initHealthTracker({
-            initial: config.health_score.initial,
-            successReward: config.health_score.success_reward,
-            rateLimitPenalty: config.health_score.rate_limit_penalty,
-            failurePenalty: config.health_score.failure_penalty,
-            recoveryRatePerHour: config.health_score.recovery_rate_per_hour,
-            minUsable: config.health_score.min_usable,
-            maxScore: config.health_score.max_score,
-        });
+        const existingTracker = getHealthTracker();
+        if (existingTracker && existingTracker.config) {
+            Object.assign(existingTracker.config, config.health_score);
+        }
+        else {
+            initHealthTracker({
+                initial: config.health_score.initial,
+                successReward: config.health_score.success_reward,
+                rateLimitPenalty: config.health_score.rate_limit_penalty,
+                failurePenalty: config.health_score.failure_penalty,
+                recoveryRatePerHour: config.health_score.recovery_rate_per_hour,
+                minUsable: config.health_score.min_usable,
+                maxScore: config.health_score.max_score,
+            });
+        }
     }
     // Initialize token tracker for hybrid strategy
     if (config.token_bucket) {
-        initTokenTracker({
-            maxTokens: config.token_bucket.max_tokens,
-            regenerationRatePerMinute: config.token_bucket.regeneration_rate_per_minute,
-            initialTokens: config.token_bucket.initial_tokens,
-        });
+        const existingTokenTracker = getTokenTracker();
+        if (existingTokenTracker && existingTokenTracker.config) {
+            Object.assign(existingTokenTracker.config, config.token_bucket);
+        }
+        else {
+            initTokenTracker({
+                maxTokens: config.token_bucket.max_tokens,
+                regenerationRatePerMinute: config.token_bucket.regeneration_rate_per_minute,
+                initialTokens: config.token_bucket.initial_tokens,
+            });
+        }
     }
     // Initialize disk signature cache if keep_thinking is enabled
     // This integrates with the in-memory cacheSignature/getCachedSignature functions
@@ -1963,7 +1975,7 @@ export const createAntigravityPlugin = (providerId) => async ({ client, director
                                     continue;
                                 }
                             }
-                            const accessToken = authRecord.access;
+                            let accessToken = authRecord.access;
                             if (!accessToken) {
                                 lastError = new Error("Missing access token");
                                 if (accountCount <= 1) {
@@ -1974,7 +1986,6 @@ export const createAntigravityPlugin = (providerId) => async ({ client, director
                             let projectContext;
                             try {
                                 projectContext = await ensureProjectContext(authRecord);
-                                resetAccountFailureState(account.index);
                             }
                             catch (error) {
                                 const { failures, shouldCooldown, cooldownMs } = trackAccountFailure(account.index);
@@ -2112,6 +2123,8 @@ export const createAntigravityPlugin = (providerId) => async ({ client, director
                                 // Track capacity retries per endpoint to prevent infinite loops
                                 let capacityRetryCount = 0;
                                 let lastEndpointIndex = -1;
+                                // Track if token refresh was already attempted on 401 for this account turn
+                                let tokenRefreshedOn401 = false;
                                 for (let i = 0; i < ANTIGRAVITY_ENDPOINT_FALLBACKS.length; i++) {
                                     // Reset capacity retry counter when switching to a new endpoint
                                     if (i !== lastEndpointIndex) {
@@ -2394,10 +2407,81 @@ export const createAntigravityPlugin = (providerId) => async ({ client, director
                                             shouldSwitchAccount = true;
                                             break;
                                         }
-                                        // Success - reset rate limit backoff state for this quota
-                                        const quotaKey = headerStyleToQuotaKey(headerStyle, family);
-                                        resetRateLimitState(account.index, quotaKey);
-                                        resetAccountFailureState(account.index);
+                                        if (response.status === 401) {
+                                            if (tokenConsumed) {
+                                                getTokenTracker().refund(account.index);
+                                                tokenConsumed = false;
+                                            }
+                                            const accountLabel = account.email || `Account ${account.index + 1}`;
+                                            if (!tokenRefreshedOn401) {
+                                                tokenRefreshedOn401 = true;
+                                                try {
+                                                    const refreshed = await refreshAccessToken(accountManager.toAuthDetails(account), client, providerId);
+                                                    if (refreshed && refreshed.access) {
+                                                        accountManager.updateFromAuth(account, refreshed);
+                                                        authRecord = refreshed;
+                                                        accessToken = refreshed.access;
+                                                        resetAccountFailureState(account.index);
+                                                        try {
+                                                            await accountManager.saveToDisk();
+                                                        }
+                                                        catch (saveError) {
+                                                            log.error("Failed to persist refreshed auth on 401", { error: String(saveError) });
+                                                        }
+                                                        pushDebug(`401 token refreshed successfully for account ${account.index}, retrying endpoint`);
+                                                        i -= 1;
+                                                        continue;
+                                                    }
+                                                }
+                                                catch (error) {
+                                                    if (error instanceof AntigravityTokenRefreshError && error.code === "invalid_grant") {
+                                                        const removedIndex = account.index;
+                                                        accountManager.removeAccount(account);
+                                                        remapAccountStateAfterRemoval(removedIndex);
+                                                        remapIndexSetAfterRemoval(triedSwitchIndices, removedIndex);
+                                                        log.warn("Removed revoked account from pool - reauthenticate via `opencode auth login`");
+                                                        try {
+                                                            await accountManager.persistAccountRemoval(account.parts.refreshToken);
+                                                        }
+                                                        catch (persistError) {
+                                                            log.error("Failed to persist revoked account removal", { error: String(persistError) });
+                                                        }
+                                                        await showToast(`⚠ Account ${accountLabel} authentication revoked (invalid_grant). Switching account...`, "warning");
+                                                        if (accountManager.getTotalAccountCount() === 0) {
+                                                            if (initialAuthWasOAuth) {
+                                                                try {
+                                                                    await client.auth.set({
+                                                                        path: { id: providerId },
+                                                                        body: { type: "oauth", refresh: "", access: "", expires: 0 },
+                                                                    });
+                                                                }
+                                                                catch (storeError) {
+                                                                    log.error("Failed to clear stored Antigravity OAuth credentials", { error: String(storeError) });
+                                                                }
+                                                            }
+                                                            const fallback = await tryAgySdkFallbackForRequest(input, init, config, agySdkCredentials, urlString);
+                                                            if (fallback)
+                                                                return fallback;
+                                                            throw new Error("All Antigravity accounts have invalid refresh tokens. Run `opencode auth login` and reauthenticate.");
+                                                        }
+                                                        lastFailure = createFailureContext(response);
+                                                        shouldSwitchAccount = true;
+                                                        break;
+                                                    }
+                                                    log.warn("Failed to refresh token on 401", { error: String(error) });
+                                                }
+                                            }
+                                            pushDebug(`unauthenticated-401 on account ${account.index} (${account.email ?? "unknown"}) - cooling down and rotating`);
+                                            accountManager.markAccountCoolingDown(account, 15 * 60 * 1000, "auth-failure");
+                                            accountManager.markRateLimited(account, 15 * 60 * 1000, family, "antigravity", model);
+                                            getHealthTracker().recordFailure(account.index);
+                                            if (accountCount > 1) {
+                                                await showToast(`⚠ Account ${accountLabel} authentication expired (401). Switching account...`, "warning");
+                                            }
+                                            lastFailure = createFailureContext(response);
+                                            shouldSwitchAccount = true;
+                                            break;
+                                        }
                                         let permissionDeniedOnProject = false;
                                         if (response.status === 403) {
                                             const errorBodyText = await response.clone().text().catch(() => "");
@@ -2489,6 +2573,10 @@ export const createAntigravityPlugin = (providerId) => async ({ client, director
                                             account.consecutiveFailures = 0;
                                             getHealthTracker().recordSuccess(account.index);
                                             accountManager.markAccountUsed(account.index);
+                                            // Success - reset rate limit backoff state for this quota
+                                            const quotaKey = headerStyleToQuotaKey(headerStyle, family);
+                                            resetRateLimitState(account.index, quotaKey);
+                                            resetAccountFailureState(account.index);
                                             void triggerAsyncQuotaRefreshForAccount(accountManager, account.index, client, providerId, config.quota_refresh_interval_minutes);
                                         }
                                         logAntigravityDebugResponse(debugContext, response, {
@@ -2603,7 +2691,9 @@ export const createAntigravityPlugin = (providerId) => async ({ client, director
                                 // selection picks a DIFFERENT one (or returns null when none are
                                 // left). Without this, hybrid selection can re-pick the same
                                 // account and the loop spins forever (no fetch, 100% CPU).
-                                triedSwitchIndices.add(account.index);
+                                if (accountManager.getAccounts().includes(account)) {
+                                    triedSwitchIndices.add(account.index);
+                                }
                                 // Avoid tight retry loops when there's only one account.
                                 if (accountCount <= 1) {
                                     if (lastFailure) {
