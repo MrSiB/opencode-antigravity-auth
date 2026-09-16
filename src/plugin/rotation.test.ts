@@ -509,6 +509,99 @@ describe("selectHybridAccount", () => {
       expect([0, 1, 2]).toContain(result);
     }
   });
+
+  it("does not block accounts with 0 tokens when quota metrics are available", () => {
+    const tokenTracker = new TokenBucketTracker({ initialTokens: 0 });
+    const now = Date.now();
+    const accounts: AccountWithMetrics[] = [
+      {
+        index: 0,
+        lastUsed: now - 1000,
+        healthScore: 80,
+        isRateLimited: false,
+        isCoolingDown: false,
+        quota: {
+          weeklyRemaining: 0.8,
+          weeklyResetTime: now + 5 * 24 * 3600 * 1000,
+          fiveHourRemaining: 0.8,
+          fiveHourResetTime: now + 3 * 3600 * 1000,
+        },
+      },
+    ];
+
+    const result = selectHybridAccount(accounts, tokenTracker);
+    expect(result).toBe(0);
+  });
+
+  it("filters out accounts with exhausted weekly quota", () => {
+    const now = Date.now();
+    const accounts: AccountWithMetrics[] = [
+      {
+        index: 0,
+        lastUsed: now - 1000,
+        healthScore: 80,
+        isRateLimited: false,
+        isCoolingDown: false,
+        quota: {
+          weeklyRemaining: 0,
+          weeklyResetTime: now + 24 * 3600 * 1000,
+          fiveHourRemaining: 0.8,
+          fiveHourResetTime: now + 3 * 3600 * 1000,
+        },
+      },
+      {
+        index: 1,
+        lastUsed: now - 1000,
+        healthScore: 80,
+        isRateLimited: false,
+        isCoolingDown: false,
+        quota: {
+          weeklyRemaining: 0.5,
+          weeklyResetTime: now + 24 * 3600 * 1000,
+          fiveHourRemaining: 0.8,
+          fiveHourResetTime: now + 3 * 3600 * 1000,
+        },
+      },
+    ];
+
+    const result = selectHybridAccount(accounts);
+    expect(result).toBe(1);
+  });
+
+  it("selects account with urgent weekly reset over account with far reset", () => {
+    const now = Date.now();
+    const accounts: AccountWithMetrics[] = [
+      {
+        index: 0,
+        lastUsed: now - 1000,
+        healthScore: 80,
+        isRateLimited: false,
+        isCoolingDown: false,
+        quota: {
+          weeklyRemaining: 0.8,
+          weeklyResetTime: now + 6 * 24 * 3600 * 1000,
+          fiveHourRemaining: 0.8,
+          fiveHourResetTime: now + 4 * 3600 * 1000,
+        },
+      },
+      {
+        index: 1,
+        lastUsed: now - 1000,
+        healthScore: 80,
+        isRateLimited: false,
+        isCoolingDown: false,
+        quota: {
+          weeklyRemaining: 0.8,
+          weeklyResetTime: now + 2 * 3600 * 1000,
+          fiveHourRemaining: 0.8,
+          fiveHourResetTime: now + 4 * 3600 * 1000,
+        },
+      },
+    ];
+
+    const result = selectHybridAccount(accounts);
+    expect(result).toBe(1);
+  });
 });
 
 describe("calculateHybridScore", () => {
@@ -585,6 +678,78 @@ describe("calculateHybridScore", () => {
     const score = calculateHybridScore(corruptAccount, -10);
     expect(Number.isFinite(score)).toBe(true);
     expect(score).toBeGreaterThanOrEqual(0);
+  });
+
+  it("prioritizes accounts with imminent weekly reset to burn remaining quota", () => {
+    const now = Date.now();
+    const accountSoonReset: AccountWithTokens = {
+      index: 0,
+      lastUsed: now - 60000,
+      healthScore: 80,
+      isRateLimited: false,
+      isCoolingDown: false,
+      quota: {
+        weeklyRemaining: 0.9,
+        weeklyResetTime: now + 2 * 3600 * 1000,
+        fiveHourRemaining: 0.9,
+        fiveHourResetTime: now + 4 * 3600 * 1000,
+      },
+    };
+
+    const accountFarReset: AccountWithTokens = {
+      index: 1,
+      lastUsed: now - 60000,
+      healthScore: 80,
+      isRateLimited: false,
+      isCoolingDown: false,
+      quota: {
+        weeklyRemaining: 0.9,
+        weeklyResetTime: now + 6 * 24 * 3600 * 1000,
+        fiveHourRemaining: 0.9,
+        fiveHourResetTime: now + 4 * 3600 * 1000,
+      },
+    };
+
+    const scoreSoon = calculateHybridScore(accountSoonReset);
+    const scoreFar = calculateHybridScore(accountFarReset);
+
+    expect(scoreSoon).toBeGreaterThan(scoreFar + 200);
+  });
+
+  it("gives higher urgency weight to weekly quota reset than 5-hour quota reset", () => {
+    const now = Date.now();
+    const urgentWeekly: AccountWithTokens = {
+      index: 0,
+      lastUsed: now - 60000,
+      healthScore: 80,
+      isRateLimited: false,
+      isCoolingDown: false,
+      quota: {
+        weeklyRemaining: 0.9,
+        weeklyResetTime: now + 3600 * 1000,
+        fiveHourRemaining: 0.9,
+        fiveHourResetTime: now + 5 * 3600 * 1000,
+      },
+    };
+
+    const urgentFiveHour: AccountWithTokens = {
+      index: 1,
+      lastUsed: now - 60000,
+      healthScore: 80,
+      isRateLimited: false,
+      isCoolingDown: false,
+      quota: {
+        weeklyRemaining: 0.9,
+        weeklyResetTime: now + 6 * 24 * 3600 * 1000,
+        fiveHourRemaining: 0.9,
+        fiveHourResetTime: now + 60 * 1000,
+      },
+    };
+
+    const scoreWeekly = calculateHybridScore(urgentWeekly);
+    const scoreFiveHour = calculateHybridScore(urgentFiveHour);
+
+    expect(scoreWeekly).toBeGreaterThan(scoreFiveHour);
   });
 });
 

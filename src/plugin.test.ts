@@ -7,6 +7,7 @@ import type { PluginClient } from "./plugin/types";
 import type { VerificationStoredAccount } from "./plugin";
 import { AccountManager } from "./plugin/accounts";
 import { DEFAULT_CONFIG } from "./plugin/config";
+import { getHealthTracker } from "./plugin/rotation";
 
 vi.mock("@opencode-ai/plugin", () => ({
   tool: Object.assign(
@@ -496,12 +497,14 @@ describe("createAntigravityPlugin auth.loader disk OAuth promotion", () => {
         },
       );
 
-      await expect(
-        (loader as { fetch: typeof fetch }).fetch(
-          "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent",
-          { method: "POST", body: "{}" },
-        ),
-      ).rejects.toThrow("All 1 account(s) rate-limited for gemini");
+      const result = await (loader as { fetch: typeof fetch }).fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent",
+        { method: "POST", body: "{}" },
+      );
+      expect(result.ok).toBe(true);
+      expect(result.headers.get("X-Antigravity-Synthetic")).toBe("true");
+      const body = await result.text();
+      expect(body).toContain("All 1 account(s) rate-limited for gemini");
 
       expect(aggregateSpy).toHaveBeenCalledWith(
         "gemini",
@@ -1657,5 +1660,652 @@ describe("eventHandler session recovery auto_resume guard", { timeout: 15000 }, 
 
     expect(mockPrompt).not.toHaveBeenCalled();
     expect(mockShowToast).not.toHaveBeenCalled();
+  });
+});
+
+describe("HTTP 401 Unauthenticated Handling & Token Refresh", () => {
+  let tmpConfigHome: string;
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    tmpConfigHome = join(tmpdir(), `opencode-antigravity-401-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
+    mkdirSync(tmpConfigHome, { recursive: true });
+    savedEnv.XDG_CONFIG_HOME = process.env.XDG_CONFIG_HOME;
+    savedEnv.OPENCODE_ANTIGRAVITY_API_KEYS = process.env.OPENCODE_ANTIGRAVITY_API_KEYS;
+    savedEnv.GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    savedEnv.GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+    process.env.XDG_CONFIG_HOME = tmpConfigHome;
+    delete process.env.OPENCODE_ANTIGRAVITY_API_KEYS;
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
+
+    vi.mocked(storageModule.loadAccounts).mockReset();
+    vi.mocked(storageModule.saveAccounts).mockReset();
+    vi.mocked(storageModule.saveAccountsReplace).mockReset();
+    vi.mocked(storageModule.removeAccountFromStorage).mockReset();
+    vi.mocked(storageModule.clearAccounts).mockReset();
+
+    resetAgySdkCredentialStateForTests();
+    loopEscapeTestHooks.resetAllInternalState();
+  });
+
+  afterEach(() => {
+    for (const [key, val] of Object.entries(savedEnv)) {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    }
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    loopEscapeTestHooks.resetAllInternalState();
+    try {
+      rmSync(tmpConfigHome, { recursive: true, force: true });
+    } catch {}
+  });
+
+  const getHeader = (
+    input: RequestInfo,
+    init: RequestInit | undefined,
+    name: string,
+  ): string | null => {
+    const fromInit = init?.headers;
+    const sources = [fromInit, input instanceof Request ? input.headers : undefined];
+    for (const h of sources) {
+      if (!h) continue;
+      if (h instanceof Headers) {
+        const v = h.get(name);
+        if (v) return v;
+      } else if (Array.isArray(h)) {
+        const found = h.find(([k]) => k.toLowerCase() === name.toLowerCase());
+        if (found) return found[1];
+      } else if (typeof h === "object") {
+        const key = Object.keys(h).find((k) => k.toLowerCase() === name.toLowerCase());
+        if (key) return (h as Record<string, string>)[key] ?? null;
+      }
+    }
+    return null;
+  };
+
+  it("on 401, immediately requests token refresh, obtains new access token, and transparently retries with 200 without switching account", async () => {
+    const now = Date.now();
+    const mockShowToast = vi.fn(async () => undefined);
+    const testClient = {
+      tui: { showToast: mockShowToast },
+      app: { log: vi.fn(async () => undefined) },
+    } as unknown as PluginClient;
+
+    vi.mocked(storageModule.loadAccounts).mockResolvedValue({
+      version: 4,
+      accounts: [
+        {
+          email: "account1@example.com",
+          refreshToken: "refresh-token-1",
+          projectId: "proj-1",
+          managedProjectId: "managed-1",
+          addedAt: now,
+          lastUsed: now,
+          enabled: true,
+        },
+        {
+          email: "account2@example.com",
+          refreshToken: "refresh-token-2",
+          projectId: "proj-2",
+          managedProjectId: "managed-2",
+          addedAt: now,
+          lastUsed: now,
+          enabled: true,
+        },
+      ],
+      activeIndex: 0,
+    });
+
+    const refreshedAccessToken = "new-access-token-1";
+    const initialAccessToken = "stale-access-token-1";
+
+    const tokenRefreshCalls: string[] = [];
+    const upstreamAuthHeaders: string[] = [];
+
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+
+      if (url.includes("oauth2.googleapis.com")) {
+        const bodyStr = init?.body ? String(init.body) : "";
+        tokenRefreshCalls.push(bodyStr);
+        return new Response(
+          JSON.stringify({
+            access_token: refreshedAccessToken,
+            expires_in: 3600,
+            token_type: "Bearer",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (url.includes("cloudcode-pa")) {
+        const auth = getHeader(input, init, "authorization");
+        if (auth) upstreamAuthHeaders.push(auth);
+
+        if (auth === `Bearer ${initialAccessToken}`) {
+          return new Response(
+            JSON.stringify({
+              error: {
+                code: 401,
+                message: "Request had invalid authentication credentials. Expected OAuth 2 access token.",
+                status: "UNAUTHENTICATED",
+              },
+            }),
+            { status: 401, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        if (auth === `Bearer ${refreshedAccessToken}`) {
+          return new Response(
+            JSON.stringify({
+              response: {
+                candidates: [
+                  {
+                    content: { parts: [{ text: "success after refresh" }], role: "model" },
+                    finishReason: "STOP",
+                    index: 0,
+                  },
+                ],
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        return new Response("Unexpected auth header", { status: 500 });
+      }
+
+      if (url.includes("generativelanguage.googleapis.com")) {
+        return new Response(JSON.stringify({ models: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      return new Response("1.2.3");
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const cooldownSpy = vi.spyOn(AccountManager.prototype, "markAccountCoolingDown");
+    const removeSpy = vi.spyOn(AccountManager.prototype, "removeAccount");
+
+    const plugin = await createAntigravityPlugin("google")({
+      client: testClient,
+      directory: process.cwd(),
+    });
+
+    const loader = await plugin.auth.loader(
+      async () => ({
+        type: "oauth" as const,
+        refresh: formatRefreshParts({
+          refreshToken: "refresh-token-1",
+          projectId: "proj-1",
+          managedProjectId: "managed-1",
+        }),
+        access: initialAccessToken,
+        expires: now + 3_600_000,
+      }),
+      { id: "google", api: "https://generativelanguage.googleapis.com/v1beta", npm: "@ai-sdk/google", models: {} },
+    );
+
+    const response = await (loader as { fetch: typeof fetch }).fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/antigravity-gemini-3.8-flash:streamGenerateContent?alt=sse",
+      {
+        method: "POST",
+        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "hi" }] }] }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(tokenRefreshCalls.length).toBeGreaterThan(0);
+    expect(tokenRefreshCalls[0]).toContain("refresh-token-1");
+    expect(upstreamAuthHeaders).toEqual([
+      `Bearer ${initialAccessToken}`,
+      `Bearer ${refreshedAccessToken}`,
+    ]);
+    expect(cooldownSpy).not.toHaveBeenCalled();
+    expect(removeSpy).not.toHaveBeenCalled();
+  });
+
+  it("on invalid_grant error during 401 refresh, removes revoked account from pool, persists removal, shows warning toast, and rotates to next account", async () => {
+    const now = Date.now();
+    const mockShowToast = vi.fn(async () => undefined);
+    const testClient = {
+      tui: { showToast: mockShowToast },
+      app: { log: vi.fn(async () => undefined) },
+    } as unknown as PluginClient;
+
+    vi.mocked(storageModule.loadAccounts).mockResolvedValue({
+      version: 4,
+      accounts: [
+        {
+          email: "revoked@example.com",
+          refreshToken: "refresh-revoked",
+          projectId: "proj-revoked",
+          managedProjectId: "managed-revoked",
+          addedAt: now,
+          lastUsed: now,
+          enabled: true,
+        },
+        {
+          email: "healthy@example.com",
+          refreshToken: "refresh-healthy",
+          projectId: "proj-healthy",
+          managedProjectId: "managed-healthy",
+          addedAt: now,
+          lastUsed: now,
+          enabled: true,
+        },
+      ],
+      activeIndex: 0,
+    });
+
+    const revokedAccessToken = "stale-access-token-revoked";
+    const healthyAccessToken = "valid-access-token-healthy";
+
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+
+      if (url.includes("oauth2.googleapis.com")) {
+        const bodyStr = init?.body ? String(init.body) : "";
+        if (bodyStr.includes("refresh-revoked")) {
+          return new Response(
+            JSON.stringify({
+              error: "invalid_grant",
+              error_description: "Token has been expired or revoked.",
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            access_token: healthyAccessToken,
+            expires_in: 3600,
+            token_type: "Bearer",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (url.includes("cloudcode-pa")) {
+        const auth = getHeader(input, init, "authorization");
+        if (auth === `Bearer ${revokedAccessToken}`) {
+          return new Response(
+            JSON.stringify({
+              error: {
+                code: 401,
+                message: "Request had invalid authentication credentials.",
+                status: "UNAUTHENTICATED",
+              },
+            }),
+            { status: 401, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            response: {
+              candidates: [
+                {
+                  content: { parts: [{ text: "success from healthy account" }], role: "model" },
+                  finishReason: "STOP",
+                  index: 0,
+                },
+              ],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (url.includes("generativelanguage.googleapis.com")) {
+        return new Response(JSON.stringify({ models: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      return new Response("1.2.3");
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const removeSpy = vi.spyOn(AccountManager.prototype, "removeAccount");
+
+    const plugin = await createAntigravityPlugin("google")({
+      client: testClient,
+      directory: process.cwd(),
+    });
+
+    const loader = await plugin.auth.loader(
+      async () => ({
+        type: "oauth" as const,
+        refresh: formatRefreshParts({
+          refreshToken: "refresh-revoked",
+          projectId: "proj-revoked",
+          managedProjectId: "managed-revoked",
+        }),
+        access: revokedAccessToken,
+        expires: now + 3_600_000,
+      }),
+      { id: "google", api: "https://generativelanguage.googleapis.com/v1beta", npm: "@ai-sdk/google", models: {} },
+    );
+
+    const response = await (loader as { fetch: typeof fetch }).fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/antigravity-gemini-3.8-flash:streamGenerateContent?alt=sse",
+      {
+        method: "POST",
+        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "hi" }] }] }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(removeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "revoked@example.com" }),
+    );
+    expect(storageModule.removeAccountFromStorage).toHaveBeenCalledWith("refresh-revoked");
+    expect(mockShowToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          variant: "warning",
+        }),
+      }),
+    );
+  });
+
+  it("if retried request still returns 401 after successful refresh, prevents infinite loops, marks account in cooldown for 15 minutes, records health failure, shows warning toast, and rotates to next account", async () => {
+    const now = Date.now();
+    const mockShowToast = vi.fn(async () => undefined);
+    const testClient = {
+      tui: { showToast: mockShowToast },
+      app: { log: vi.fn(async () => undefined) },
+    } as unknown as PluginClient;
+
+    vi.mocked(storageModule.loadAccounts).mockResolvedValue({
+      version: 4,
+      accounts: [
+        {
+          email: "failing@example.com",
+          refreshToken: "refresh-failing",
+          projectId: "proj-failing",
+          managedProjectId: "managed-failing",
+          addedAt: now,
+          lastUsed: now,
+          enabled: true,
+        },
+        {
+          email: "backup@example.com",
+          refreshToken: "refresh-backup",
+          projectId: "proj-backup",
+          managedProjectId: "managed-backup",
+          addedAt: now,
+          lastUsed: now,
+          enabled: true,
+        },
+      ],
+      activeIndex: 0,
+    });
+
+    const initialFailingToken = "stale-failing-token";
+    const refreshedFailingToken = "refreshed-failing-token";
+    const backupToken = "valid-backup-token";
+
+    let refreshCallCount = 0;
+
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+
+      if (url.includes("oauth2.googleapis.com")) {
+        const bodyStr = init?.body ? String(init.body) : "";
+        if (bodyStr.includes("refresh-failing")) {
+          refreshCallCount++;
+          return new Response(
+            JSON.stringify({
+              access_token: refreshedFailingToken,
+              expires_in: 3600,
+              token_type: "Bearer",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            access_token: backupToken,
+            expires_in: 3600,
+            token_type: "Bearer",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (url.includes("cloudcode-pa")) {
+        const auth = getHeader(input, init, "authorization");
+
+        if (auth === `Bearer ${initialFailingToken}`) {
+          return new Response(
+            JSON.stringify({
+              error: { code: 401, message: "Unauthenticated initial", status: "UNAUTHENTICATED" },
+            }),
+            { status: 401, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        if (auth === `Bearer ${refreshedFailingToken}`) {
+          return new Response(
+            JSON.stringify({
+              error: { code: 401, message: "Unauthenticated post-refresh", status: "UNAUTHENTICATED" },
+            }),
+            { status: 401, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            response: {
+              candidates: [
+                {
+                  content: { parts: [{ text: "success from backup account" }], role: "model" },
+                  finishReason: "STOP",
+                  index: 0,
+                },
+              ],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (url.includes("generativelanguage.googleapis.com")) {
+        return new Response(JSON.stringify({ models: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      return new Response("1.2.3");
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const cooldownSpy = vi.spyOn(AccountManager.prototype, "markAccountCoolingDown");
+    const healthSpy = vi.spyOn(getHealthTracker(), "recordFailure");
+
+    const plugin = await createAntigravityPlugin("google")({
+      client: testClient,
+      directory: process.cwd(),
+    });
+
+    const loader = await plugin.auth.loader(
+      async () => ({
+        type: "oauth" as const,
+        refresh: formatRefreshParts({
+          refreshToken: "refresh-failing",
+          projectId: "proj-failing",
+          managedProjectId: "managed-failing",
+        }),
+        access: initialFailingToken,
+        expires: now + 3_600_000,
+      }),
+      { id: "google", api: "https://generativelanguage.googleapis.com/v1beta", npm: "@ai-sdk/google", models: {} },
+    );
+
+    const response = await (loader as { fetch: typeof fetch }).fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/antigravity-gemini-3.8-flash:streamGenerateContent?alt=sse",
+      {
+        method: "POST",
+        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "hi" }] }] }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(refreshCallCount).toBe(1);
+    expect(cooldownSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "failing@example.com" }),
+      15 * 60 * 1000,
+      "auth-failure",
+    );
+    expect(healthSpy).toHaveBeenCalledWith(0);
+    expect(mockShowToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          variant: "warning",
+        }),
+      }),
+    );
+  });
+
+  it("does not invoke success state resets (resetAccountFailureState, resetRateLimitState) on 401 responses before status inspection", async () => {
+    const now = Date.now();
+    const mockShowToast = vi.fn(async () => undefined);
+    const testClient = {
+      tui: { showToast: mockShowToast },
+      app: { log: vi.fn(async () => undefined) },
+    } as unknown as PluginClient;
+
+    vi.mocked(storageModule.loadAccounts).mockResolvedValue({
+      version: 4,
+      accounts: [
+        {
+          email: "account-401@example.com",
+          refreshToken: "refresh-401",
+          projectId: "proj-401",
+          managedProjectId: "managed-401",
+          addedAt: now,
+          lastUsed: now,
+          enabled: true,
+        },
+        {
+          email: "backup-401@example.com",
+          refreshToken: "refresh-backup-401",
+          projectId: "proj-backup-401",
+          managedProjectId: "managed-backup-401",
+          addedAt: now,
+          lastUsed: now,
+          enabled: true,
+        },
+      ],
+      activeIndex: 0,
+    });
+
+    const quotaKey = "gemini-antigravity";
+    loopEscapeTestHooks.seedAccountFailure(0, 3);
+    loopEscapeTestHooks.seedRateLimitState(0, quotaKey, 2);
+
+    expect(loopEscapeTestHooks.getAccountFailureCount(0)).toBe(3);
+    expect(loopEscapeTestHooks.getRateLimitConsecutive(0, quotaKey)).toBe(2);
+
+    const initialToken = "stale-401-token";
+    const backupToken = "valid-backup-token";
+
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+
+      if (url.includes("oauth2.googleapis.com")) {
+        const bodyStr = init?.body ? String(init.body) : "";
+        if (bodyStr.includes("refresh-401")) {
+          return new Response("Refresh server unavailable", { status: 503 });
+        }
+        return new Response(
+          JSON.stringify({
+            access_token: backupToken,
+            expires_in: 3600,
+            token_type: "Bearer",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (url.includes("cloudcode-pa")) {
+        const auth = getHeader(input, init, "authorization");
+        if (auth === `Bearer ${initialToken}`) {
+          return new Response(
+            JSON.stringify({
+              error: { code: 401, message: "Unauthenticated", status: "UNAUTHENTICATED" },
+            }),
+            { status: 401, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            response: {
+              candidates: [
+                {
+                  content: { parts: [{ text: "success from backup" }], role: "model" },
+                  finishReason: "STOP",
+                  index: 0,
+                },
+              ],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (url.includes("generativelanguage.googleapis.com")) {
+        return new Response(JSON.stringify({ models: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      return new Response("1.2.3");
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const plugin = await createAntigravityPlugin("google")({
+      client: testClient,
+      directory: process.cwd(),
+    });
+
+    const loader = await plugin.auth.loader(
+      async () => ({
+        type: "oauth" as const,
+        refresh: formatRefreshParts({
+          refreshToken: "refresh-401",
+          projectId: "proj-401",
+          managedProjectId: "managed-401",
+        }),
+        access: initialToken,
+        expires: now + 3_600_000,
+      }),
+      { id: "google", api: "https://generativelanguage.googleapis.com/v1beta", npm: "@ai-sdk/google", models: {} },
+    );
+
+    const response = await (loader as { fetch: typeof fetch }).fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/antigravity-gemini-3.8-flash:streamGenerateContent?alt=sse",
+      {
+        method: "POST",
+        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "hi" }] }] }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(loopEscapeTestHooks.getRateLimitConsecutive(0, quotaKey)).toBe(2);
+    expect(loopEscapeTestHooks.getAccountFailureCount(0)).toBeDefined();
   });
 });

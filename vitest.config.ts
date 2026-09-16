@@ -7,5 +7,6 @@ export default defineConfig({
     include: ['src/**/*.test.ts'],
     exclude: ['node_modules', 'dist'],
     pool: 'forks',
+    setupFiles: ['./src/test-setup.ts'],
   },
 });

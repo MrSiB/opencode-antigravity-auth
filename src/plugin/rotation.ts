@@ -203,60 +203,67 @@ export class HealthScoreTracker {
 // HYBRID SELECTION
 // ============================================================================
 
+export interface AccountQuotaMetrics {
+  weeklyRemaining?: number;
+  weeklyResetTime?: number;
+  fiveHourRemaining?: number;
+  fiveHourResetTime?: number;
+}
+
 export interface AccountWithMetrics {
   index: number;
   lastUsed: number;
   healthScore: number;
   isRateLimited: boolean;
   isCoolingDown: boolean;
+  quota?: AccountQuotaMetrics;
 }
 
-/** Stickiness bonus added to current account's score to prevent unnecessary switching */
 const STICKINESS_BONUS = 150;
-
-/** Minimum score advantage required to switch away from current account */
 const SWITCH_THRESHOLD = 100;
+const WEEK_MS = 7 * 24 * 3600 * 1000;
+const FIVE_HOUR_MS = 5 * 3600 * 1000;
 
-/**
- * Select account using hybrid strategy with stickiness:
- * 1. Filter available accounts (not rate-limited, not cooling down, healthy, has tokens)
- * 2. Calculate priority score: health (2x) + tokens (5x) + freshness (0.1x)
- * 3. Apply stickiness bonus to current account
- * 4. Only switch if another account beats current by SWITCH_THRESHOLD
- * 
- * @param accounts - All accounts with their metrics
- * @param tokenTracker - Token bucket tracker for token balances
- * @param currentAccountIndex - Currently active account index (for stickiness)
- * @param minHealthScore - Minimum health score to be considered
- * @returns Best account index, or null if none available
- */
 export function selectHybridAccount(
   accounts: AccountWithMetrics[],
-  tokenTracker: TokenBucketTracker,
+  tokenTracker?: TokenBucketTracker | null,
   currentAccountIndex: number | null = null,
   minHealthScore: number = 50,
 ): number | null {
+  const now = Date.now();
   const candidates = accounts
-    .filter(acc => 
-      !acc.isRateLimited && 
-      !acc.isCoolingDown && 
-      acc.healthScore >= minHealthScore &&
-      tokenTracker.hasTokens(acc.index)
-    )
+    .filter(acc => {
+      if (acc.isRateLimited || acc.isCoolingDown) return false;
+      if (acc.healthScore < minHealthScore) return false;
+
+      if (acc.quota) {
+        if (typeof acc.quota.weeklyRemaining === "number" && acc.quota.weeklyRemaining <= 0) {
+          const resetTime = acc.quota.weeklyResetTime ?? 0;
+          if (resetTime > now) return false;
+        }
+        if (typeof acc.quota.fiveHourRemaining === "number" && acc.quota.fiveHourRemaining <= 0) {
+          const resetTime = acc.quota.fiveHourResetTime ?? 0;
+          if (resetTime > now) return false;
+        }
+      } else if (tokenTracker && accounts.every(a => !a.quota)) {
+        if (!tokenTracker.hasTokens(acc.index)) return false;
+      }
+
+      return true;
+    })
     .map(acc => ({
       ...acc,
-      tokens: tokenTracker.getTokens(acc.index)
+      tokens: tokenTracker?.getTokens(acc.index) ?? 50
     }));
 
   if (candidates.length === 0) {
     return null;
   }
 
-  const maxTokens = tokenTracker.getMaxTokens();
+  const maxTokens = tokenTracker?.getMaxTokens() ?? 50;
   const scored = candidates
     .map(acc => {
       const baseScore = calculateHybridScore(acc, maxTokens);
-      // Apply stickiness bonus to current account
       const stickinessBonus = acc.index === currentAccountIndex ? STICKINESS_BONUS : 0;
       return {
         index: acc.index,
@@ -272,11 +279,8 @@ export function selectHybridAccount(
     return null;
   }
 
-  // If current account is still a candidate, check if switch is warranted
   const currentCandidate = scored.find(s => s.isCurrent);
   if (currentCandidate && !best.isCurrent) {
-    // Only switch if best beats current's BASE score by threshold
-    // (compare base scores to avoid circular stickiness bonus comparison)
     const advantage = best.baseScore - currentCandidate.baseScore;
     if (advantage < SWITCH_THRESHOLD) {
       return currentCandidate.index;
@@ -287,24 +291,58 @@ export function selectHybridAccount(
 }
 
 export interface AccountWithTokens extends AccountWithMetrics {
-  tokens: number;
+  tokens?: number;
 }
 
 export function calculateHybridScore(
   account: AccountWithTokens,
-  maxTokens: number
+  maxTokens: number = 50
 ): number {
   const safeMaxTokens = typeof maxTokens === "number" && Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : 50;
   const healthScore = Number.isFinite(account?.healthScore) ? account.healthScore : 0;
-  const tokens = Number.isFinite(account?.tokens) ? account.tokens : 0;
   const lastUsed = Number.isFinite(account?.lastUsed) ? account.lastUsed : 0;
 
-  const healthComponent = healthScore * 2; // 0-200
-  const tokenComponent = (tokens / safeMaxTokens) * 100 * 5; // 0-500
+  const healthComponent = healthScore * 2;
   const secondsSinceUsed = Math.max(0, Date.now() - lastUsed) / 1000;
-  const freshnessComponent = Math.min(secondsSinceUsed, 3600) * 0.1; // 0-360
+  const freshnessComponent = Math.min(secondsSinceUsed, 3600) * 0.1;
 
-  const total = healthComponent + tokenComponent + freshnessComponent;
+  let quotaComponent = 0;
+
+  if (account.quota) {
+    const now = Date.now();
+    const wRem = Number.isFinite(account.quota.weeklyRemaining) ? Math.max(0, Math.min(1, account.quota.weeklyRemaining!)) : 1.0;
+    const fRem = Number.isFinite(account.quota.fiveHourRemaining) ? Math.max(0, Math.min(1, account.quota.fiveHourRemaining!)) : 1.0;
+
+    const baseQuota = (wRem * 100) + (fRem * 80);
+
+    let weeklyUrgencyBonus = 0;
+    if (account.quota.weeklyResetTime && account.quota.weeklyResetTime > now) {
+      const weeklyTimeLeft = account.quota.weeklyResetTime - now;
+      const progress = Math.max(0, Math.min(1, 1 - weeklyTimeLeft / WEEK_MS));
+      const urgencyFactor = Math.pow(progress, 2.5);
+      weeklyUrgencyBonus = wRem * urgencyFactor * 350;
+    } else if (account.quota.weeklyResetTime && account.quota.weeklyResetTime <= now) {
+      weeklyUrgencyBonus = wRem * 350;
+    }
+
+    let fiveHourUrgencyBonus = 0;
+    if (account.quota.fiveHourResetTime && account.quota.fiveHourResetTime > now) {
+      const fiveHourTimeLeft = account.quota.fiveHourResetTime - now;
+      const progress5h = Math.max(0, Math.min(1, 1 - fiveHourTimeLeft / FIVE_HOUR_MS));
+      const urgencyFactor5h = Math.pow(progress5h, 2.0);
+      fiveHourUrgencyBonus = fRem * urgencyFactor5h * 100;
+    } else if (account.quota.fiveHourResetTime && account.quota.fiveHourResetTime <= now) {
+      fiveHourUrgencyBonus = fRem * 100;
+    }
+
+    quotaComponent = baseQuota + weeklyUrgencyBonus + fiveHourUrgencyBonus;
+  } else if (typeof account.tokens === "number" && Number.isFinite(account.tokens)) {
+    quotaComponent = (account.tokens / safeMaxTokens) * 100 * 5;
+  } else {
+    quotaComponent = 200;
+  }
+
+  const total = healthComponent + quotaComponent + freshnessComponent;
   return Number.isFinite(total) ? Math.max(0, total) : 0;
 }
 

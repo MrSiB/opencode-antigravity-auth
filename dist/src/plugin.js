@@ -550,6 +550,20 @@ function isModelPermissionDeniedOnProjectError(bodyText) {
     const decoded = decodeEscapedText(bodyText).toLowerCase();
     return decoded.includes("permission denied on resource project");
 }
+/**
+ * Detects Google Cloud Code Assist license entitlement errors (error #3501).
+ * Returned as HTTP 403 when the account does not have a valid Code Assist
+ * subscription/license assigned. Unlike validation_required (which asks the
+ * user to verify in browser), a license error means the account is simply not
+ * entitled and cannot be fixed by re-authenticating — only by assigning the
+ * correct license. We cool the account down for 1 hour and rotate.
+ */
+function isLicenseError(bodyText) {
+    const decoded = decodeEscapedText(bodyText).toLowerCase();
+    return (decoded.includes("you do not have a valid license") ||
+        decoded.includes("does not have a valid license") ||
+        decoded.includes("no valid license"));
+}
 async function verifyAccountAccess(account, client, providerId) {
     const parsed = parseRefreshParts(account.refreshToken);
     if (!parsed.refreshToken) {
@@ -1855,10 +1869,10 @@ export const createAntigravityPlugin = (providerId) => async ({ client, director
                                 if (maxWaitMs > 0 && waitMs > maxWaitMs) {
                                     const waitTimeFormatted = formatWaitTime(waitMs);
                                     await showToast(`Rate limited for ${waitTimeFormatted}. Try again later or add another account.`, "error");
-                                    // Return a proper rate limit error response
-                                    throw new Error(`All ${accountCount} account(s) rate-limited for ${family}. ` +
-                                        `Quota resets in ${waitTimeFormatted}. ` +
-                                        `Add more accounts with \`opencode auth login\` or wait and retry.`);
+                                    const errorMessage = `[Antigravity Error] All ${accountCount} account(s) rate-limited for ${family}.\n` +
+                                        `Quota resets in ${waitTimeFormatted}.\n` +
+                                        `Add more accounts with \`opencode auth login\` or wait and retry.`;
+                                    return createSyntheticErrorResponse(errorMessage, model ?? undefined, family);
                                 }
                                 if (!rateLimitToastShown) {
                                     await showToast(`All ${accountCount} account(s) rate-limited for ${family}. Waiting ${waitSecValue}s...`, "warning");
@@ -2501,6 +2515,21 @@ export const createAntigravityPlugin = (providerId) => async ({ client, director
                                                 }
                                                 pushDebug(`verification-required: ${account.enabled ? `last-survivor kept enabled for account ${account.index}` : `disabled account ${account.index}`}`);
                                                 getHealthTracker().recordFailure(account.index);
+                                                lastFailure = createFailureContext(response);
+                                                shouldSwitchAccount = true;
+                                                break;
+                                            }
+                                            if (isLicenseError(errorBodyText)) {
+                                                const licenseLabel = account.email || `Account ${account.index + 1}`;
+                                                const licenseCooldownMs = 60 * 60 * 1000;
+                                                accountManager.markAccountCoolingDown(account, licenseCooldownMs, "license-error");
+                                                accountManager.markRateLimited(account, licenseCooldownMs, family, headerStyle, model);
+                                                getHealthTracker().recordFailure(account.index);
+                                                pushDebug(`license-error-403: cooling account ${account.index} for 1h and switching`);
+                                                if (accountManager.shouldShowAccountToast(account.index, 60000)) {
+                                                    await showToast(`⚠ ${licenseLabel} has no valid Code Assist license. Switching account...`, "warning");
+                                                    accountManager.markToastShown(account.index);
+                                                }
                                                 lastFailure = createFailureContext(response);
                                                 shouldSwitchAccount = true;
                                                 break;

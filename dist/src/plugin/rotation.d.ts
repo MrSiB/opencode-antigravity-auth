@@ -76,31 +76,25 @@ export declare class HealthScoreTracker {
         consecutiveFailures: number;
     }>;
 }
+export interface AccountQuotaMetrics {
+    weeklyRemaining?: number;
+    weeklyResetTime?: number;
+    fiveHourRemaining?: number;
+    fiveHourResetTime?: number;
+}
 export interface AccountWithMetrics {
     index: number;
     lastUsed: number;
     healthScore: number;
     isRateLimited: boolean;
     isCoolingDown: boolean;
+    quota?: AccountQuotaMetrics;
 }
-/**
- * Select account using hybrid strategy with stickiness:
- * 1. Filter available accounts (not rate-limited, not cooling down, healthy, has tokens)
- * 2. Calculate priority score: health (2x) + tokens (5x) + freshness (0.1x)
- * 3. Apply stickiness bonus to current account
- * 4. Only switch if another account beats current by SWITCH_THRESHOLD
- *
- * @param accounts - All accounts with their metrics
- * @param tokenTracker - Token bucket tracker for token balances
- * @param currentAccountIndex - Currently active account index (for stickiness)
- * @param minHealthScore - Minimum health score to be considered
- * @returns Best account index, or null if none available
- */
-export declare function selectHybridAccount(accounts: AccountWithMetrics[], tokenTracker: TokenBucketTracker, currentAccountIndex?: number | null, minHealthScore?: number): number | null;
+export declare function selectHybridAccount(accounts: AccountWithMetrics[], tokenTracker?: TokenBucketTracker | null, currentAccountIndex?: number | null, minHealthScore?: number): number | null;
 export interface AccountWithTokens extends AccountWithMetrics {
-    tokens: number;
+    tokens?: number;
 }
-export declare function calculateHybridScore(account: AccountWithTokens, maxTokens: number): number;
+export declare function calculateHybridScore(account: AccountWithTokens, maxTokens?: number): number;
 export interface TokenBucketConfig {
     /** Maximum tokens per account (default: 50) */
     maxTokens: number;

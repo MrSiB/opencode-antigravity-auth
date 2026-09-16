@@ -9,6 +9,16 @@ vi.mock("./token", () => ({
   refreshAccessToken: vi.fn(),
 }));
 
+vi.mock("./storage", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./storage")>();
+  return {
+    ...original,
+    saveAccounts: vi.fn().mockResolvedValue(undefined),
+    saveAccountsReplace: vi.fn().mockResolvedValue(undefined),
+    removeAccountFromStorage: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
 const mockedRefresh = vi.mocked(refreshAccessToken);
 
 // Mock PluginClient

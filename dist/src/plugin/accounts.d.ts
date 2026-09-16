@@ -1,6 +1,7 @@
 import { type AccountStorageV4, type AccountMetadataV3, type RateLimitStateV3, type ModelFamily, type HeaderStyle, type CooldownReason } from "./storage";
 import type { OAuthAuthDetails, RefreshParts } from "./types";
 import type { AccountSelectionStrategy } from "./config/schema";
+import { type AccountQuotaMetrics } from "./rotation";
 import { type Fingerprint, type FingerprintVersion } from "./fingerprint";
 import type { QuotaGroup, QuotaGroupSummary } from "./quota";
 export type { ModelFamily, HeaderStyle, CooldownReason } from "./storage";
@@ -68,6 +69,7 @@ export interface ManagedAccount {
     /** Cached quota data from last checkAccountsQuota() call */
     cachedQuota?: Partial<Record<QuotaGroup, QuotaGroupSummary>>;
     cachedQuotaUpdatedAt?: number;
+    quotaSummary?: any[];
     verificationRequired?: boolean;
     verificationRequiredAt?: number;
     verificationRequiredReason?: string;
@@ -91,6 +93,7 @@ export declare function hasAvailableQuotaForQuotaKey(account: ManagedAccount, ke
  */
 export declare function resolveQuotaGroup(family: ModelFamily, model?: string | null): QuotaGroup;
 export declare function computeSoftQuotaCacheTtlMs(ttlConfig: "auto" | number, refreshIntervalMinutes: number): number;
+export declare function extractQuotaMetrics(account: ManagedAccount, family: ModelFamily, model?: string | null): AccountQuotaMetrics | undefined;
 /**
  * In-memory multi-account manager with sticky account selection.
  *

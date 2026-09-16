@@ -1953,6 +1953,8 @@ describe("reportTokenUsageTelemetry", () => {
         project_name: "proj-123",
         session_id: "ses-456",
         source_client: "opencode-antigravity-auth",
+        key_prefix: "test-telemet",
+        user_label: "opencode_telemetry",
       });
     } finally {
       globalThis.fetch = originalFetch;

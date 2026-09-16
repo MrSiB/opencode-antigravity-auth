@@ -2,7 +2,7 @@ import { formatRefreshParts, parseRefreshParts } from "./auth";
 import { loadAccounts, removeAccountFromStorage, saveAccounts, saveAccountsReplace, type AccountStorageV4, type AccountMetadataV3, type RateLimitStateV3, type ModelFamily, type HeaderStyle, type CooldownReason } from "./storage";
 import type { OAuthAuthDetails, RefreshParts } from "./types";
 import type { AccountSelectionStrategy } from "./config/schema";
-import { getHealthTracker, getTokenTracker, selectHybridAccount, type AccountWithMetrics } from "./rotation";
+import { getHealthTracker, getTokenTracker, selectHybridAccount, type AccountWithMetrics, type AccountQuotaMetrics } from "./rotation";
 import { generateFingerprint, updateFingerprintVersion, type Fingerprint, type FingerprintVersion, MAX_FINGERPRINT_HISTORY } from "./fingerprint";
 import type { QuotaGroup, QuotaGroupSummary } from "./quota";
 import { getModelFamily } from "./transform/model-resolver";
@@ -183,6 +183,7 @@ export interface ManagedAccount {
   /** Cached quota data from last checkAccountsQuota() call */
   cachedQuota?: Partial<Record<QuotaGroup, QuotaGroupSummary>>;
   cachedQuotaUpdatedAt?: number;
+  quotaSummary?: any[];
   verificationRequired?: boolean;
   verificationRequiredAt?: number;
   verificationRequiredReason?: string;
@@ -454,6 +455,85 @@ export function computeSoftQuotaCacheTtlMs(
   return ttlConfig * 60 * 1000;
 }
 
+export function extractQuotaMetrics(
+  account: ManagedAccount,
+  family: ModelFamily,
+  model?: string | null,
+): AccountQuotaMetrics | undefined {
+  const now = nowMs();
+
+  if (Array.isArray(account.quotaSummary) && account.quotaSummary.length > 0) {
+    const isGemini = family !== "claude";
+    const group = account.quotaSummary.find((g: any) => {
+      const name = (g?.displayName || "").toLowerCase();
+      return isGemini ? name.includes("gemini") : (name.includes("claude") || name.includes("gpt") || name.includes("3p"));
+    });
+
+    if (group && Array.isArray(group.buckets)) {
+      let weeklyRemaining: number | undefined;
+      let weeklyResetTime: number | undefined;
+      let fiveHourRemaining: number | undefined;
+      let fiveHourResetTime: number | undefined;
+
+      for (const b of group.buckets) {
+        const id = (b.bucketId || "").toLowerCase();
+        const win = (b.window || "").toLowerCase();
+        const disp = (b.displayName || "").toLowerCase();
+        const isWeekly = win === "weekly" || id.includes("weekly") || disp.includes("weekly");
+        const is5h = win === "5h" || id.includes("5h") || disp.includes("5 hour") || disp.includes("five hour");
+
+        const resetMs = b.resetTime ? Date.parse(b.resetTime) : undefined;
+        const isExpired = resetMs !== undefined && Number.isFinite(resetMs) && resetMs <= now;
+        const remaining = b.disabled ? 0 : isExpired ? 1.0 : (b.remainingFraction ?? 1.0);
+
+        if (isWeekly) {
+          weeklyRemaining = remaining;
+          weeklyResetTime = resetMs;
+        } else if (is5h) {
+          fiveHourRemaining = remaining;
+          fiveHourResetTime = resetMs;
+        }
+      }
+
+      if (weeklyRemaining !== undefined || fiveHourRemaining !== undefined) {
+        return {
+          weeklyRemaining,
+          weeklyResetTime,
+          fiveHourRemaining,
+          fiveHourResetTime,
+        };
+      }
+    }
+  }
+
+  if (account.cachedQuota) {
+    const quotaGroup = resolveQuotaGroup(family, model);
+    const groupData = account.cachedQuota[quotaGroup];
+    if (groupData && groupData.remainingFraction !== undefined) {
+      const resetMs = groupData.resetTime ? Date.parse(groupData.resetTime) : undefined;
+      const isExpired = resetMs !== undefined && Number.isFinite(resetMs) && resetMs <= now;
+      const remaining = isExpired ? 1.0 : groupData.remainingFraction;
+
+      const diffMs = resetMs !== undefined && Number.isFinite(resetMs) ? resetMs - now : 0;
+      if (diffMs > 6 * 3600 * 1000) {
+        return {
+          weeklyRemaining: remaining,
+          weeklyResetTime: resetMs,
+          fiveHourRemaining: 1.0,
+        };
+      } else {
+        return {
+          fiveHourRemaining: remaining,
+          fiveHourResetTime: resetMs,
+          weeklyRemaining: 1.0,
+        };
+      }
+    }
+  }
+
+  return undefined;
+}
+
 /**
  * In-memory multi-account manager with sticky account selection.
  *
@@ -586,6 +666,7 @@ export class AccountManager {
             fingerprintHistory: acc.fingerprintHistory ?? [],
             cachedQuota: acc.cachedQuota as Partial<Record<QuotaGroup, QuotaGroupSummary>> | undefined,
             cachedQuotaUpdatedAt: acc.cachedQuotaUpdatedAt,
+            quotaSummary: acc.quotaSummary,
             verificationRequired: acc.verificationRequired,
             verificationRequiredAt: acc.verificationRequiredAt,
             verificationRequiredReason: acc.verificationRequiredReason,
@@ -773,6 +854,7 @@ export class AccountManager {
             isRateLimited: isRateLimitedForHeaderStyle(acc, family, headerStyle, model) ||
                           isOverSoftQuotaThreshold(acc, family, headerStyle, softQuotaThresholdPercent, softQuotaCacheTtlMs, model),
             isCoolingDown: this.isAccountCoolingDown(acc),
+            quota: extractQuotaMetrics(acc, family, model),
           };
         });
 
@@ -1378,6 +1460,7 @@ export class AccountManager {
         fingerprintHistory: a.fingerprintHistory?.length ? a.fingerprintHistory : undefined,
         cachedQuota: a.cachedQuota && Object.keys(a.cachedQuota).length > 0 ? a.cachedQuota : undefined,
         cachedQuotaUpdatedAt: a.cachedQuotaUpdatedAt,
+        quotaSummary: a.quotaSummary,
         verificationRequired: a.verificationRequired,
         verificationRequiredAt: a.verificationRequiredAt,
         verificationRequiredReason: a.verificationRequiredReason,

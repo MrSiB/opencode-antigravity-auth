@@ -57,7 +57,7 @@ export interface AccountStorage {
     accounts: AccountMetadata[];
     activeIndex: number;
 }
-export type CooldownReason = "auth-failure" | "network-error" | "project-error" | "validation-required" | "last-survivor-cooldown";
+export type CooldownReason = "auth-failure" | "network-error" | "project-error" | "validation-required" | "last-survivor-cooldown" | "license-error";
 export interface AccountMetadataV3 {
     email?: string;
     refreshToken: string;
@@ -103,6 +103,7 @@ export interface AccountMetadataV3 {
         modelCount: number;
     }>;
     cachedQuotaUpdatedAt?: number;
+    quotaSummary?: any[];
     tag?: string;
     tags?: string[];
 }
