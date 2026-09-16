@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, renameSync, copyFileSync, unlinkSync, } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, renameSync, copyFileSync, unlinkSync, statSync, } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { createHash, randomBytes } from "node:crypto";
@@ -238,9 +238,39 @@ async function ensureFileExists(path) {
 }
 async function withFileLock(path, fn) {
     await ensureFileExists(path);
+    const lockfilePath = `${path}.lock`;
+    try {
+        const stat = statSync(lockfilePath, { throwIfNoEntry: false });
+        if (stat && !stat.isDirectory()) {
+            unlinkSync(lockfilePath);
+        }
+    }
+    catch { }
     let release = null;
     try {
-        release = await lockfile.lock(path, LOCK_OPTIONS);
+        try {
+            release = await lockfile.lock(path, LOCK_OPTIONS);
+        }
+        catch (lockError) {
+            if (String(lockError).includes("ENOTDIR") || String(lockError).includes("not a directory")) {
+                try {
+                    const stat = statSync(lockfilePath, { throwIfNoEntry: false });
+                    if (stat && !stat.isDirectory()) {
+                        unlinkSync(lockfilePath);
+                        release = await lockfile.lock(path, LOCK_OPTIONS);
+                    }
+                    else {
+                        throw lockError;
+                    }
+                }
+                catch {
+                    throw lockError;
+                }
+            }
+            else {
+                throw lockError;
+            }
+        }
         return await fn();
     }
     finally {

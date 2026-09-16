@@ -65,6 +65,11 @@ export declare function getDefaultGemini3ThinkingLevel(model: string): string;
 /** Models released on the public Gemini API without a verified Antigravity route. */
 export declare function isGeminiPublicOnlyModel(model: string): boolean;
 /**
+ * Models supported by the Gemini CLI backend (cloudcode-pa.googleapis.com).
+ * Gemini 3.6+, 3.7+, 3.8+ are only hosted in Antigravity daily sandbox.
+ */
+export declare function isGeminiCliSupportedModel(model: string): boolean;
+/**
  * Resolves a model name with optional tier suffix and quota prefix to its actual API model name
  * and corresponding thinking configuration.
  *

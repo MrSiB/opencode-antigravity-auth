@@ -263,6 +263,25 @@ export function isGeminiPublicOnlyModel(model: string): boolean {
 }
 
 /**
+ * Models supported by the Gemini CLI backend (cloudcode-pa.googleapis.com).
+ * Gemini 3.6+, 3.7+, 3.8+ are only hosted in Antigravity daily sandbox.
+ */
+export function isGeminiCliSupportedModel(model: string): boolean {
+  if (!model) return false;
+  const normalized = model.toLowerCase().replace(QUOTA_PREFIX_REGEX, "");
+  if (/^gemini-3\.[6-9]/i.test(normalized)) {
+    return false;
+  }
+  if (normalized.includes("claude")) {
+    return false;
+  }
+  if (IMAGE_GENERATION_MODELS.test(normalized)) {
+    return false;
+  }
+  return true;
+}
+
+/**
  * Resolves a model name with optional tier suffix and quota prefix to its actual API model name
  * and corresponding thinking configuration.
  *

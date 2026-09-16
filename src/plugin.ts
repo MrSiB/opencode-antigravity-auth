@@ -44,6 +44,7 @@ import {
   transformAntigravityResponse,
 } from "./plugin/request";
 import {
+  isGeminiCliSupportedModel,
   isGeminiPublicOnlyModel,
   resolveModelWithTier,
 } from "./plugin/transform/model-resolver";
@@ -3194,16 +3195,21 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   if (isLicenseError(errorBodyText)) {
                     const licenseLabel = account.email || `Account ${account.index + 1}`;
                     const licenseCooldownMs = 60 * 60 * 1000;
-                    accountManager.markAccountCoolingDown(account, licenseCooldownMs, "license-error");
-                    accountManager.markRateLimited(account, licenseCooldownMs, family, headerStyle, model);
-                    getHealthTracker().recordFailure(account.index);
-                    pushDebug(`license-error-403: cooling account ${account.index} for 1h and switching`);
-                    if (accountManager.shouldShowAccountToast(account.index, 60000)) {
-                      await showToast(
-                        `⚠ ${licenseLabel} has no valid Code Assist license. Switching account...`,
-                        "warning",
-                      );
-                      accountManager.markToastShown(account.index);
+                    if (headerStyle === "gemini-cli") {
+                      accountManager.markRateLimited(account, licenseCooldownMs, family, "gemini-cli", model);
+                      pushDebug(`license-error-403 on gemini-cli for account ${account.index} - marked gemini-cli rate-limited`);
+                    } else {
+                      accountManager.markAccountCoolingDown(account, licenseCooldownMs, "license-error");
+                      accountManager.markRateLimited(account, licenseCooldownMs, family, headerStyle, model);
+                      getHealthTracker().recordFailure(account.index);
+                      pushDebug(`license-error-403: cooling account ${account.index} for 1h and switching`);
+                      if (accountManager.shouldShowAccountToast(account.index, 60000)) {
+                        await showToast(
+                          `⚠ ${licenseLabel} has no valid Code Assist license. Switching account...`,
+                          "warning",
+                        );
+                        accountManager.markToastShown(account.index);
+                      }
                     }
                     lastFailure = createFailureContext(response);
                     shouldSwitchAccount = true;
@@ -4504,7 +4510,8 @@ function resolveHeaderRoutingDecision(
       family === "gemini" &&
       !explicitQuota &&
       resolvedModel?.isImageModel !== true &&
-      !isGeminiPublicOnlyModel(modelWithSuffix ?? ""),
+      !isGeminiPublicOnlyModel(modelWithSuffix ?? "") &&
+      isGeminiCliSupportedModel(modelWithSuffix ?? ""),
   };
 }
 

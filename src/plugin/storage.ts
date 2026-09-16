@@ -8,6 +8,7 @@ import {
   renameSync,
   copyFileSync,
   unlinkSync,
+  statSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -436,9 +437,35 @@ async function ensureFileExists(path: string): Promise<void> {
 
 async function withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
   await ensureFileExists(path);
+  const lockfilePath = `${path}.lock`;
+  try {
+    const stat = statSync(lockfilePath, { throwIfNoEntry: false });
+    if (stat && !stat.isDirectory()) {
+      unlinkSync(lockfilePath);
+    }
+  } catch {}
+
   let release: (() => Promise<void>) | null = null;
   try {
-    release = await lockfile.lock(path, LOCK_OPTIONS);
+    try {
+      release = await lockfile.lock(path, LOCK_OPTIONS);
+    } catch (lockError) {
+      if (String(lockError).includes("ENOTDIR") || String(lockError).includes("not a directory")) {
+        try {
+          const stat = statSync(lockfilePath, { throwIfNoEntry: false });
+          if (stat && !stat.isDirectory()) {
+            unlinkSync(lockfilePath);
+            release = await lockfile.lock(path, LOCK_OPTIONS);
+          } else {
+            throw lockError;
+          }
+        } catch {
+          throw lockError;
+        }
+      } else {
+        throw lockError;
+      }
+    }
     return await fn();
   } finally {
     if (release) {

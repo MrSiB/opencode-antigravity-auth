@@ -8,7 +8,7 @@ import { pressEnterToContinue, promptAddAnotherAccount, promptLoginMode, promptP
 import { ensureProjectContext } from "./plugin/project.js";
 import { startAntigravityDebugRequest, logAntigravityDebugResponse, logAccountContext, logRateLimitEvent, logRateLimitSnapshot, logResponseBody, logModelFamily, isDebugEnabled, getLogFilePath, initializeDebug, sanitizeUrlForLog, } from "./plugin/debug.js";
 import { antigravityDispatcher, buildThinkingWarmupBody, isGenerativeLanguageRequest, prepareAntigravityRequest, transformAntigravityResponse, } from "./plugin/request.js";
-import { isGeminiPublicOnlyModel, resolveModelWithTier, } from "./plugin/transform/model-resolver.js";
+import { isGeminiCliSupportedModel, isGeminiPublicOnlyModel, resolveModelWithTier, } from "./plugin/transform/model-resolver.js";
 import { isEmptyResponseBody, createSyntheticErrorResponse, } from "./plugin/request-helpers.js";
 import { EmptyResponseError } from "./plugin/errors.js";
 import { AntigravityTokenRefreshError, refreshAccessToken } from "./plugin/token.js";
@@ -2522,13 +2522,19 @@ export const createAntigravityPlugin = (providerId) => async ({ client, director
                                             if (isLicenseError(errorBodyText)) {
                                                 const licenseLabel = account.email || `Account ${account.index + 1}`;
                                                 const licenseCooldownMs = 60 * 60 * 1000;
-                                                accountManager.markAccountCoolingDown(account, licenseCooldownMs, "license-error");
-                                                accountManager.markRateLimited(account, licenseCooldownMs, family, headerStyle, model);
-                                                getHealthTracker().recordFailure(account.index);
-                                                pushDebug(`license-error-403: cooling account ${account.index} for 1h and switching`);
-                                                if (accountManager.shouldShowAccountToast(account.index, 60000)) {
-                                                    await showToast(`⚠ ${licenseLabel} has no valid Code Assist license. Switching account...`, "warning");
-                                                    accountManager.markToastShown(account.index);
+                                                if (headerStyle === "gemini-cli") {
+                                                    accountManager.markRateLimited(account, licenseCooldownMs, family, "gemini-cli", model);
+                                                    pushDebug(`license-error-403 on gemini-cli for account ${account.index} - marked gemini-cli rate-limited`);
+                                                }
+                                                else {
+                                                    accountManager.markAccountCoolingDown(account, licenseCooldownMs, "license-error");
+                                                    accountManager.markRateLimited(account, licenseCooldownMs, family, headerStyle, model);
+                                                    getHealthTracker().recordFailure(account.index);
+                                                    pushDebug(`license-error-403: cooling account ${account.index} for 1h and switching`);
+                                                    if (accountManager.shouldShowAccountToast(account.index, 60000)) {
+                                                        await showToast(`⚠ ${licenseLabel} has no valid Code Assist license. Switching account...`, "warning");
+                                                        accountManager.markToastShown(account.index);
+                                                    }
                                                 }
                                                 lastFailure = createFailureContext(response);
                                                 shouldSwitchAccount = true;
@@ -3609,7 +3615,8 @@ function resolveHeaderRoutingDecision(urlString, family, config) {
         allowQuotaFallback: family === "gemini" &&
             !explicitQuota &&
             resolvedModel?.isImageModel !== true &&
-            !isGeminiPublicOnlyModel(modelWithSuffix ?? ""),
+            !isGeminiPublicOnlyModel(modelWithSuffix ?? "") &&
+            isGeminiCliSupportedModel(modelWithSuffix ?? ""),
     };
 }
 function getCliFirst(config) {
