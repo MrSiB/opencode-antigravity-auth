@@ -289,6 +289,35 @@ function isOverSoftQuotaThreshold(account, family, headerStyle, thresholdPercent
         return false;
     if (thresholdPercent >= 100)
         return false;
+    if (Array.isArray(account.quotaSummary) && account.quotaSummary.length > 0) {
+        const metrics = extractQuotaMetrics(account, family, model);
+        if (metrics) {
+            const now = nowMs();
+            if (typeof metrics.fiveHourRemaining === "number") {
+                const resetMs = metrics.fiveHourResetTime;
+                const expired = resetMs !== undefined && Number.isFinite(resetMs) && resetMs <= now;
+                const rem = expired ? 1.0 : metrics.fiveHourRemaining;
+                const usedPercent = (1 - Math.max(0, Math.min(1, rem))) * 100;
+                if (usedPercent >= thresholdPercent) {
+                    const accountLabel = formatAccountLabel(account.email, account.index);
+                    debugLogToFile(`[SoftQuota] Skipping ${accountLabel}: 5h usage ${usedPercent.toFixed(1)}% >= threshold ${thresholdPercent}%`);
+                    return true;
+                }
+            }
+            if (typeof metrics.weeklyRemaining === "number") {
+                const resetMs = metrics.weeklyResetTime;
+                const expired = resetMs !== undefined && Number.isFinite(resetMs) && resetMs <= now;
+                const rem = expired ? 1.0 : metrics.weeklyRemaining;
+                const usedPercent = (1 - Math.max(0, Math.min(1, rem))) * 100;
+                if (usedPercent >= thresholdPercent) {
+                    const accountLabel = formatAccountLabel(account.email, account.index);
+                    debugLogToFile(`[SoftQuota] Skipping ${accountLabel}: weekly usage ${usedPercent.toFixed(1)}% >= threshold ${thresholdPercent}%`);
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
     if (!account.cachedQuota)
         return false;
     if (account.cachedQuotaUpdatedAt == null)
