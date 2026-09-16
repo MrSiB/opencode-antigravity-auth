@@ -396,6 +396,23 @@ export function extractQuotaMetrics(account, family, model) {
  *
  * Source of truth for the pool is `antigravity-accounts.json`.
  */
+export function isAccountQuotaExhausted(account, family, model) {
+    const quota = extractQuotaMetrics(account, family, model);
+    if (!quota)
+        return false;
+    const now = nowMs();
+    if (typeof quota.weeklyRemaining === "number" && quota.weeklyRemaining <= 0) {
+        const resetTime = quota.weeklyResetTime ?? 0;
+        if (resetTime > now)
+            return true;
+    }
+    if (typeof quota.fiveHourRemaining === "number" && quota.fiveHourRemaining <= 0) {
+        const resetTime = quota.fiveHourResetTime ?? 0;
+        if (resetTime > now)
+            return true;
+    }
+    return false;
+}
 export class AccountManager {
     accounts = [];
     cursor = 0;
@@ -686,11 +703,11 @@ export class AccountManager {
             this.sessionOffsetApplied[family] = true;
         }
         const current = this.getCurrentAccountForFamily(family);
-        if (current && !excludeIndices?.has(current.index)) {
+        if (current && current.enabled !== false && !excludeIndices?.has(current.index)) {
             clearExpiredRateLimits(current);
             const isLimitedForRequestedStyle = isRateLimitedForHeaderStyle(current, family, headerStyle, model);
             const isOverThreshold = isOverSoftQuotaThreshold(current, family, headerStyle, softQuotaThresholdPercent, softQuotaCacheTtlMs, model);
-            if (!isLimitedForRequestedStyle && !isOverThreshold && !this.isAccountCoolingDown(current)) {
+            if (!isLimitedForRequestedStyle && !isOverThreshold && !this.isAccountCoolingDown(current) && !isAccountQuotaExhausted(current, family, model)) {
                 this.markTouchedForQuota(current, quotaKey);
                 return current;
             }
@@ -709,7 +726,8 @@ export class AccountManager {
                 !excludeIndices?.has(a.index) &&
                 !isRateLimitedForHeaderStyle(a, family, headerStyle, model) &&
                 !isOverSoftQuotaThreshold(a, family, headerStyle, softQuotaThresholdPercent, softQuotaCacheTtlMs, model) &&
-                !this.isAccountCoolingDown(a);
+                !this.isAccountCoolingDown(a) &&
+                !isAccountQuotaExhausted(a, family, model);
         });
         if (available.length === 0) {
             return null;
@@ -881,7 +899,7 @@ export class AccountManager {
                 return false;
             }
             // Skip cooling down accounts
-            if (this.isAccountCoolingDown(acc)) {
+            if (this.isAccountCoolingDown(acc) || isAccountQuotaExhausted(acc, family, model)) {
                 return false;
             }
             // Clear expired rate limits before checking

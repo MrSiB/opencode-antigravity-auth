@@ -103,6 +103,7 @@ export declare function extractQuotaMetrics(account: ManagedAccount, family: Mod
  *
  * Source of truth for the pool is `antigravity-accounts.json`.
  */
+export declare function isAccountQuotaExhausted(account: ManagedAccount, family: ModelFamily, model?: string | null): boolean;
 export declare class AccountManager {
     private accounts;
     private cursor;
